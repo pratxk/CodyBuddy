@@ -16,9 +16,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/generate", tags=["generate"])
 
 _executor = ThreadPoolExecutor(max_workers=4)
-_job_queues: Dict[str, asyncio.Queue] = {}
+_job_queues: Dict[str, asyncio.Queue] = {}  # NOTE: single-consumer per job; redesign planned in a later task.
 _DONE = "__DONE__"
 _ERR = "__ERR__:"
+
+
+def shutdown_executor() -> None:
+    """Shut down the thread pool gracefully (call from app lifespan on shutdown)."""
+    _executor.shutdown(wait=False)
 
 
 class GenerateRequest(BaseModel):

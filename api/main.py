@@ -1,15 +1,23 @@
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.generate import router as generate_router
+from api.generate import router as generate_router, shutdown_executor
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="CodyBuddy Studio API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    shutdown_executor()
+
+
+app = FastAPI(title="CodyBuddy Studio API", version="0.1.0", lifespan=lifespan)
 
 _origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 app.add_middleware(
