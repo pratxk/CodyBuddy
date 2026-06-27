@@ -1,6 +1,11 @@
 import asyncio
 import json
+import pathlib
+
+from agent import graph as g
 from agent.events import AgentEventEmitter, BUILD_TOPOLOGY
+from agent.scaffold import is_sandpack_shaped
+from agent.states import Plan, File, TaskPlan, ImplementationTask
 
 
 def test_emitter_pushes_graph_init_and_start():
@@ -19,12 +24,6 @@ def test_emitter_pushes_graph_init_and_start():
     assert first["type"] == "graph_init"
     assert second["type"] == "agent_start"
     assert second["agent_id"] == "planner"
-
-
-from unittest.mock import patch
-from agent import graph as g
-from agent.states import Plan, File, TaskPlan, ImplementationTask
-from agent.scaffold import is_sandpack_shaped
 
 
 def test_run_build_returns_sandpack_files_no_disk(tmp_path, monkeypatch):
@@ -48,5 +47,4 @@ def test_run_build_returns_sandpack_files_no_disk(tmp_path, monkeypatch):
     assert "/App.js" in result["files"]
     assert "Tic" in result["files"]["/App.js"]
     # no generated_project dir created
-    import pathlib
     assert not (pathlib.Path.cwd() / "generated_project").exists()

@@ -4,12 +4,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 
-from agent.llm import CODER_CHAIN, PLANNER_CHAIN, chat, chat_structured
+from agent.llm import CODER_CHAIN, PLANNER_CHAIN, chat, chat_structured, strip_code_fences
 from agent.prompts import (CODER_SYSTEM_PROMPT, architect_prompt,
                            coder_prompt, planner_prompt)
 from agent.scaffold import normalize_files
 from agent.states import ImplementationTask, Plan, TaskPlan
-from agent.llm import strip_code_fences
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -83,8 +82,3 @@ def run_build(user_prompt: str, emitter=None) -> dict:
         emitter.graph_init(); emitter.start_next()
     result = build_graph(emitter).invoke({"user_prompt": user_prompt})
     return {"plan": result["plan"], "files": result["files"]}
-
-
-if __name__ == "__main__":
-    out = run_build("Build a tic-tac-toe game")
-    print("files:", list(out["files"].keys()))

@@ -32,8 +32,3 @@ class TaskPlan(BaseModel):
     )
 
     model_config = ConfigDict(extra="ignore")
-
-
-class CoderState(BaseModel):
-    task_plan: TaskPlan = Field(description="The task plan being implemented")
-    current_step_idx: int = Field(0, description="Index of the current implementation step")
