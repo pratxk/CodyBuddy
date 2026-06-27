@@ -1,13 +1,25 @@
-DESIGN_GUIDELINES = """DESIGN REQUIREMENTS (non-negotiable — the app must look polished, not bare HTML):
+DESIGN_GUIDELINES = """DESIGN REQUIREMENTS (non-negotiable — the app must look modern and polished, not bare HTML):
 - ALWAYS include a /styles.css file and import it once at the top of /App.js: import "./styles.css";
-- Modern, attractive visual design: a cohesive color palette (a clear accent color), a
-  system font stack, generous spacing, rounded corners (8-16px), and subtle shadows.
-- Center the main UI in a card/container with comfortable padding; make it responsive.
-- Style EVERY interactive element: buttons get padding, accent background, hover and
-  active states, and a pointer cursor; inputs get borders/focus states.
-- Use readable font sizes and clear visual hierarchy (heading, body, controls).
-- Prefer a clean light or tasteful dark theme. Avoid unstyled default browser elements.
-- Do not rely on external CSS frameworks/CDNs for styling — write real CSS in /styles.css."""
+- Define CSS custom properties (variables) at :root for the full color token set:
+    --color-bg, --color-surface, --color-border, --color-primary, --color-accent,
+    --color-text, --color-muted. Use these variables throughout — no raw hex literals.
+- Accent: apply a subtle linear-gradient (e.g. 135deg from --color-primary to --color-accent)
+  to the page header/hero banner and to primary buttons. Not everywhere — just the focal points.
+- Type scale: body 1rem, headings 1.5–2rem, captions/labels 0.8125rem. System font stack.
+- Layout: center the main UI in a card/container (max-width ~640px, auto margins, comfortable
+  padding 1.5–2rem). Page bg should differ from card surface. Responsive with no horizontal scroll.
+- Depth & polish: card gets box-shadow (0 4px 24px rgba(0,0,0,.08)), border-radius 12–16px.
+  Inputs get a 1px border, border-radius 8px, and 0.75rem padding.
+- Smooth transitions: all interactive elements (buttons, inputs, links) get
+  transition: all 0.2s ease so hover/focus feel snappy, not instant.
+- Hover/active states: buttons darken or shift gradient on :hover; scale(0.97) on :active.
+- Accessibility: every focusable element gets a visible :focus-visible outline
+  (outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 4px).
+- Subtle entrance animation: @keyframes fadeInUp { from { opacity:0; transform:translateY(12px) }
+  to { opacity:1; transform:translateY(0) } } applied to the main card/container
+  (animation: fadeInUp 0.35s ease both).
+- Choose either a clean light theme or a tasteful dark theme that suits the app's purpose.
+  Avoid unstyled browser defaults. Write REAL, complete CSS — never empty or placeholder."""
 
 
 def planner_prompt(user_prompt: str) -> str:
@@ -70,10 +82,12 @@ CODER_SYSTEM_PROMPT = (
     "components and hooks. Use ES module imports/exports. Import sibling files by their "
     "path (e.g. import Board from './components/Board'). /App.js MUST import \"./styles.css\". "
     "Only use CDN-resolvable npm packages. Never reference files that do not exist in the plan. "
-    "PRODUCE VISUALLY POLISHED UIs: a cohesive color palette with an accent color, system "
-    "font stack, generous spacing, rounded corners, subtle shadows, a centered responsive "
-    "card layout, and styled buttons/inputs with hover/active/focus states. When the file is "
-    "/styles.css, write real, complete, attractive CSS — never an empty or placeholder file."
+    "PRODUCE VISUALLY POLISHED UIs: use CSS variables for color tokens, a gradient accent on "
+    "header/primary buttons, system font stack, rem-based type scale, comfortable spacing, "
+    "rounded corners (12-16px), soft box-shadows, a centered responsive card, smooth "
+    "transitions (0.2s ease) on all interactive elements, hover/active states, "
+    "focus-visible outlines for accessibility, and a fadeInUp keyframe on the main card. "
+    "When the file is /styles.css, write real, complete, modern CSS — never empty or placeholder."
 )
 
 
