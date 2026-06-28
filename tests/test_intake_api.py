@@ -1,5 +1,6 @@
 """
 Tests for POST /api/intake — network-free (chat_structured is mocked).
+Auth is bypassed via conftest override.
 """
 from unittest.mock import patch
 
@@ -57,7 +58,6 @@ def test_intake_hard_cap_forces_ready():
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["ready"] is True
-    # synthesized brief folds in the prompt and the gathered answers
     assert "build me an app" in body["brief"]
     assert "ans0" in body["brief"]
 

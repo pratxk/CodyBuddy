@@ -3,6 +3,8 @@ Tests for:
  - Project model construction and field defaults (no live DB)
  - /api/enhance returns updated files (mock LLM + mock _upsert_project)
  - /api/projects list and get shape (mock SessionLocal)
+
+Auth is bypassed via conftest override (FAKE_USER_ID = aaaabbbb-...).
 """
 import uuid
 from datetime import datetime, timezone
@@ -34,20 +36,13 @@ def test_project_constructor_fields():
 
 def test_project_uuid_default():
     """Project id column has a Python-side default (uuid4) wired in the table metadata."""
-    # SQLAlchemy applies Python-side defaults at flush/INSERT, not at __init__.
     id_col = Project.__table__.c["id"]
     assert id_col.default is not None
-    # The default arg callable should be uuid.uuid4 (same function by name,
-    # identity check skipped — multiple uuid module imports yield different objects)
     assert id_col.default.arg.__name__ == "uuid4"
 
 
 def test_project_timestamp_defaults():
     """created_at and updated_at are set by _utcnow on construction."""
-    row = Project(session_id="s", title="t", brief="b", files={})
-    # Column defaults are applied at INSERT time, not at __init__ time,
-    # so we verify the callable is wired — if defaults were accidentally dropped
-    # they'd be None here. Check the column definitions directly.
     from db.models import _utcnow
     ts = _utcnow()
     assert ts.tzinfo is not None  # timezone-aware
@@ -100,7 +95,6 @@ def test_enhance_returns_updated_files(monkeypatch):
         json={
             "files": _ENHANCE_FILES,
             "instruction": "change the heading to PURPLE",
-            "session_id": "sess-123",
         },
     )
     assert resp.status_code == 200
@@ -118,7 +112,6 @@ def test_enhance_returns_project_id(monkeypatch):
         json={
             "files": _ENHANCE_FILES,
             "instruction": "make heading blue",
-            "session_id": "sess-456",
         },
     )
     assert resp.status_code == 200
@@ -129,16 +122,7 @@ def test_enhance_missing_instruction_returns_400(monkeypatch):
     client = _make_enhance_client(monkeypatch)
     resp = client.post(
         "/api/enhance",
-        json={"files": _ENHANCE_FILES, "instruction": "  ", "session_id": "s"},
-    )
-    assert resp.status_code == 400
-
-
-def test_enhance_missing_session_id_returns_400(monkeypatch):
-    client = _make_enhance_client(monkeypatch)
-    resp = client.post(
-        "/api/enhance",
-        json={"files": _ENHANCE_FILES, "instruction": "do something", "session_id": ""},
+        json={"files": _ENHANCE_FILES, "instruction": "  "},
     )
     assert resp.status_code == 400
 
@@ -147,20 +131,24 @@ def test_enhance_empty_files_returns_400(monkeypatch):
     client = _make_enhance_client(monkeypatch)
     resp = client.post(
         "/api/enhance",
-        json={"files": {}, "instruction": "do something", "session_id": "s"},
+        json={"files": {}, "instruction": "do something"},
     )
     assert resp.status_code == 400
 
 
 # ── /api/projects tests ───────────────────────────────────────────────────────
 
+# FAKE_USER_ID from conftest — projects must match this for ownership checks
+_FAKE_USER_ID = uuid.UUID("aaaabbbb-cccc-dddd-eeee-ffffaaaabbbb")
 
-def _make_fake_project_row(session_id="sess-test"):
+
+def _make_fake_project_row(user_id=_FAKE_USER_ID):
     """Return a SimpleNamespace that mimics a Project row (no DB, no ORM state)."""
     from types import SimpleNamespace
     return SimpleNamespace(
         id=uuid.UUID("12345678-1234-5678-1234-567812345678"),
-        session_id=session_id,
+        session_id="",
+        user_id=user_id,
         title="Fake Project",
         brief="a brief",
         files={"/App.js": "x"},
@@ -201,7 +189,7 @@ def test_projects_list_shape(monkeypatch):
 
     from fastapi.testclient import TestClient
     from api.main import app
-    resp = TestClient(app).get("/api/projects?session_id=sess-test")
+    resp = TestClient(app).get("/api/projects")
     assert resp.status_code == 200
     items = resp.json()
     assert isinstance(items, list)
@@ -210,7 +198,6 @@ def test_projects_list_shape(monkeypatch):
     assert items[0]["title"] == "Fake Project"
     assert "created_at" in items[0]
     assert "updated_at" in items[0]
-    # list response must NOT include files (summary only)
     assert "files" not in items[0]
 
 
@@ -222,20 +209,12 @@ def test_projects_get_shape(monkeypatch):
     from fastapi.testclient import TestClient
     from api.main import app
     pid = "12345678-1234-5678-1234-567812345678"
-    resp = TestClient(app).get(f"/api/projects/{pid}?session_id=sess-test")
+    resp = TestClient(app).get(f"/api/projects/{pid}")
     assert resp.status_code == 200
     body = resp.json()
     assert body["id"] == pid
     assert "files" in body
     assert "brief" in body
-    assert "session_id" in body
-
-
-def test_projects_list_missing_session_id_returns_400():
-    from fastapi.testclient import TestClient
-    from api.main import app
-    resp = TestClient(app).get("/api/projects?session_id=")
-    assert resp.status_code == 400
 
 
 def test_projects_get_not_found(monkeypatch):
@@ -245,24 +224,26 @@ def test_projects_get_not_found(monkeypatch):
     from fastapi.testclient import TestClient
     from api.main import app
     pid = "12345678-1234-5678-1234-567812345678"
-    resp = TestClient(app).get(f"/api/projects/{pid}?session_id=sess-test")
+    resp = TestClient(app).get(f"/api/projects/{pid}")
     assert resp.status_code == 404
 
 
-def test_projects_get_wrong_session_returns_404(monkeypatch):
+def test_projects_get_wrong_user_returns_404(monkeypatch):
+    """Project owned by different user returns 404."""
     import api.projects as proj_mod
-    fake_row = _make_fake_project_row(session_id="other-session")
+    other_user_id = uuid.UUID("bbbbcccc-dddd-eeee-ffff-000011112222")
+    fake_row = _make_fake_project_row(user_id=other_user_id)
     monkeypatch.setattr(proj_mod, "SessionLocal", lambda: _FakeDB(row=fake_row))
 
     from fastapi.testclient import TestClient
     from api.main import app
     pid = "12345678-1234-5678-1234-567812345678"
-    resp = TestClient(app).get(f"/api/projects/{pid}?session_id=different-session")
+    resp = TestClient(app).get(f"/api/projects/{pid}")
     assert resp.status_code == 404
 
 
 def test_projects_get_invalid_uuid_returns_404():
     from fastapi.testclient import TestClient
     from api.main import app
-    resp = TestClient(app).get("/api/projects/not-a-uuid?session_id=s")
+    resp = TestClient(app).get("/api/projects/not-a-uuid")
     assert resp.status_code == 404

@@ -45,7 +45,6 @@ def test_generate_events_streams_result_and_done():
     assert sse_resp.status_code == 200
 
     raw = sse_resp.text
-    # Parse SSE lines: lines that start with "data: "
     events = [
         json.loads(line[len("data: "):])
         for line in raw.splitlines()

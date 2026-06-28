@@ -1,5 +1,7 @@
 """
 Tests for POST /api/oncall — network/DB-free.
+Auth is bypassed via conftest override.
+session_id is now optional/ignored; removed tests for blank session_id validation.
 """
 import uuid
 from unittest.mock import MagicMock, patch
@@ -25,7 +27,7 @@ def _mock_db_session():
     """Return a mock context-manager DB session that silently does nothing."""
     row = MagicMock()
     row.id = uuid.uuid4()
-    row.session_id = "sess-abc"
+    row.user_id = uuid.UUID("aaaabbbb-cccc-dddd-eeee-ffffaaaabbbb")
 
     session = MagicMock()
     session.__enter__ = MagicMock(return_value=session)
@@ -57,7 +59,6 @@ def test_oncall_returns_fixed_files():
     body = r.json()
     assert "project_id" in body
     assert "files" in body
-    # normalize_files adds leading slash and /package.json
     assert "/App.js" in body["files"]
     assert "/styles.css" in body["files"]
     assert "/package.json" in body["files"]
@@ -76,7 +77,6 @@ def test_oncall_normalize_runs():
             json={
                 "files": no_slash_files,
                 "error": "some error",
-                "session_id": "sess-xyz",
             },
         )
     assert r.status_code == 200
@@ -86,25 +86,16 @@ def test_oncall_normalize_runs():
 def test_oncall_validation_blank_error():
     r = client.post(
         "/api/oncall",
-        json={"files": _SAMPLE_FILES, "error": "   ", "session_id": "sess-abc"},
+        json={"files": _SAMPLE_FILES, "error": "   "},
     )
     assert r.status_code == 400
     assert "error" in r.json()["detail"].lower()
 
 
-def test_oncall_validation_blank_session_id():
-    r = client.post(
-        "/api/oncall",
-        json={"files": _SAMPLE_FILES, "error": "some error", "session_id": ""},
-    )
-    assert r.status_code == 400
-    assert "session_id" in r.json()["detail"].lower()
-
-
 def test_oncall_validation_empty_files():
     r = client.post(
         "/api/oncall",
-        json={"files": {}, "error": "some error", "session_id": "sess-abc"},
+        json={"files": {}, "error": "some error"},
     )
     assert r.status_code == 400
     assert "files" in r.json()["detail"].lower()
