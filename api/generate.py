@@ -11,6 +11,8 @@ from pydantic import BaseModel
 
 from agent.events import AgentEventEmitter, BUILD_TOPOLOGY
 from agent.graph import run_build
+from db.database import SessionLocal
+from db.models import Project
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/generate", tags=["generate"])
@@ -31,11 +33,30 @@ class GenerateRequest(BaseModel):
     session_id: str | None = None
 
 
-def _run_job(job_id, queue, loop, brief):
+def _persist_project(session_id: str | None, title: str, brief: str, files: dict) -> str | None:
+    """Save a Project row; returns the new UUID string or None on failure."""
+    if not session_id:
+        return None
+    try:
+        with SessionLocal() as db:
+            row = Project(session_id=session_id, title=title, brief=brief, files=files)
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return str(row.id)
+    except Exception as exc:  # noqa: BLE001  ponytail: DB hiccup must not break the build
+        logger.error("DB persist failed (non-fatal): %s", exc)
+        return None
+
+
+def _run_job(job_id, queue, loop, brief, session_id=None):
     emitter = AgentEventEmitter(loop, queue, BUILD_TOPOLOGY)
     try:
         out = run_build(brief, emitter=emitter)
-        payload = {"type": "result", "name": out["plan"].name, "files": out["files"]}
+        project_id = _persist_project(session_id, out["plan"].name, brief, out["files"])
+        payload: dict = {"type": "result", "name": out["plan"].name, "files": out["files"]}
+        if project_id:
+            payload["project_id"] = project_id
         asyncio.run_coroutine_threadsafe(queue.put(json.dumps(payload)), loop)
         asyncio.run_coroutine_threadsafe(queue.put(_DONE), loop)
     except Exception as exc:  # noqa: BLE001
@@ -51,7 +72,7 @@ async def generate_start(req: GenerateRequest) -> dict:
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     _job_queues[job_id] = queue
-    _executor.submit(_run_job, job_id, queue, loop, req.brief)
+    _executor.submit(_run_job, job_id, queue, loop, req.brief, req.session_id)
     return {"job_id": job_id}
 
 
