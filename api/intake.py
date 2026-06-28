@@ -9,12 +9,14 @@ Stateless: the FE passes the full Q&A history on every call. No DB writes.
 """
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from agent.llm import PLANNER_CHAIN, chat_structured
 from agent.prompts import intake_prompt
 from agent.states import IntakeStep
+from auth.dependencies import get_current_user
+from db.models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/intake", tags=["intake"])
@@ -31,7 +33,7 @@ class QAPair(BaseModel):
 class IntakeRequest(BaseModel):
     prompt: str
     history: list[QAPair] = Field(default_factory=list)
-    session_id: str | None = None
+    session_id: str | None = None  # ponytail: kept for backward compat, not used
 
 
 def _synthesize_brief(prompt: str, history: list[QAPair]) -> str:
@@ -41,7 +43,10 @@ def _synthesize_brief(prompt: str, history: list[QAPair]) -> str:
 
 
 @router.post("", response_model=IntakeStep)
-def intake(req: IntakeRequest) -> IntakeStep:
+def intake(
+    req: IntakeRequest,
+    current_user: User = Depends(get_current_user),
+) -> IntakeStep:
     if not req.prompt.strip():
         raise HTTPException(status_code=400, detail="prompt must not be empty")
 

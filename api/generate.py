@@ -5,14 +5,15 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncGenerator, Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from agent.events import AgentEventEmitter, BUILD_TOPOLOGY
 from agent.graph import run_build
+from auth.dependencies import get_current_user
 from db.database import SessionLocal
-from db.models import Project
+from db.models import Project, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/generate", tags=["generate"])
@@ -30,16 +31,16 @@ def shutdown_executor() -> None:
 
 class GenerateRequest(BaseModel):
     brief: str
-    session_id: str | None = None
+    session_id: str | None = None  # ponytail: kept for backward compat, ignored for ownership
 
 
-def _persist_project(session_id: str | None, title: str, brief: str, files: dict) -> str | None:
+def _persist_project(user_id: str | None, title: str, brief: str, files: dict) -> str | None:
     """Save a Project row; returns the new UUID string or None on failure."""
-    if not session_id:
+    if not user_id:
         return None
     try:
         with SessionLocal() as db:
-            row = Project(session_id=session_id, title=title, brief=brief, files=files)
+            row = Project(session_id="", user_id=uuid.UUID(user_id), title=title, brief=brief, files=files)
             db.add(row)
             db.commit()
             db.refresh(row)
@@ -49,11 +50,11 @@ def _persist_project(session_id: str | None, title: str, brief: str, files: dict
         return None
 
 
-def _run_job(job_id, queue, loop, brief, session_id=None):
+def _run_job(job_id, queue, loop, brief, user_id=None):
     emitter = AgentEventEmitter(loop, queue, BUILD_TOPOLOGY)
     try:
         out = run_build(brief, emitter=emitter)
-        project_id = _persist_project(session_id, out["plan"].name, brief, out["files"])
+        project_id = _persist_project(user_id, out["plan"].name, brief, out["files"])
         payload: dict = {"type": "result", "name": out["plan"].name, "files": out["files"]}
         if project_id:
             payload["project_id"] = project_id
@@ -65,14 +66,18 @@ def _run_job(job_id, queue, loop, brief, session_id=None):
 
 
 @router.post("/start")
-async def generate_start(req: GenerateRequest) -> dict:
+async def generate_start(
+    req: GenerateRequest,
+    current_user: User = Depends(get_current_user),
+) -> dict:
     if not req.brief.strip():
         raise HTTPException(status_code=400, detail="brief is required")
     job_id = str(uuid.uuid4())
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue = asyncio.Queue()
     _job_queues[job_id] = queue
-    _executor.submit(_run_job, job_id, queue, loop, req.brief, req.session_id)
+    user_id = str(current_user.id)
+    _executor.submit(_run_job, job_id, queue, loop, req.brief, user_id)
     return {"job_id": job_id}
 
 
@@ -95,6 +100,7 @@ async def _sse(job_id, queue) -> AsyncGenerator[str, None]:
         _job_queues.pop(job_id, None)
 
 
+# ponytail: events stream is open (no auth) — job_id UUID is already a nonce
 @router.get("/events/{job_id}")
 async def generate_events(job_id: str) -> StreamingResponse:
     queue = _job_queues.get(job_id)
