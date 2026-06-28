@@ -145,6 +145,20 @@ Files to emit (in dependency order — dependencies before consumers): {file_lis
 Use EXACTLY the delimiter format above for each file. No other text outside the delimiters."""
 
 
+def oncall_prompt(files: dict[str, str], error: str) -> str:
+    """Build the OnCallAgent single-call prompt.
+
+    ponytail: delegates to vibe_prompt so file-embedding + format rules are DRY.
+    The instruction is an error-fix directive that asks for root-cause analysis.
+    """
+    instruction = (
+        f"FIX RUNTIME/COMPILE ERROR — diagnose the ROOT CAUSE then return the COMPLETE "
+        f"corrected file set (all files, not just the changed ones).\n\n"
+        f"Error:\n{error}"
+    )
+    return vibe_prompt(files, instruction)
+
+
 def vibe_prompt(files: dict[str, str], instruction: str) -> str:
     """Build the single-call VibeEngineer prompt.
 

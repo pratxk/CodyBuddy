@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.enhance import router as enhance_router
 from api.generate import router as generate_router, shutdown_executor
+from api.oncall import router as oncall_router
 from api.projects import router as projects_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -39,6 +40,7 @@ app.add_middleware(
 
 app.include_router(generate_router, prefix="/api")
 app.include_router(enhance_router, prefix="/api")
+app.include_router(oncall_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
 
 
