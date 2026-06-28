@@ -31,7 +31,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CodyBuddy Studio API", version="0.1.0", lifespan=lifespan)
 
-_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+# ponytail: strip each origin so "a, b" (stray spaces) doesn't break the CORS match.
+_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_origins,
@@ -49,8 +50,13 @@ app.include_router(projects_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["health"])
+@app.get("/healthz", tags=["health"])
+@app.get("/ping", tags=["health"])
+@app.get("/", tags=["health"])
 def health() -> dict:
-    return {"status": "ok", "service": "CodyBuddy Studio API"}
+    # Lightweight, DB-free — safe for an uptime pinger to hit frequently to keep the
+    # HF Space warm (free Spaces sleep after ~48h idle).
+    return {"status": "ok", "service": "AppSmith API"}
 
 
 if __name__ == "__main__":
