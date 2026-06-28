@@ -7,7 +7,13 @@ DESIGN_GUIDELINES = """DESIGN REQUIREMENTS (non-negotiable — the app must look
   to the page header/hero banner and to primary buttons. Not everywhere — just the focal points.
 - Type scale: body 1rem, headings 1.5–2rem, captions/labels 0.8125rem. System font stack.
 - Layout: center the main UI in a card/container (max-width ~640px, auto margins, comfortable
-  padding 1.5–2rem). Page bg should differ from card surface. Responsive with no horizontal scroll.
+  padding 1.5–2rem). Page bg should differ from card surface.
+- RESPONSIVE (required): the app must look good from 320px phones to wide desktops. Use a
+  fluid container (width:100%; max-width:Npx; margin:auto) and box-sizing:border-box. Never
+  cause horizontal scroll. Build grids/rows with CSS grid/flex that reflow; size cells with
+  fr/%/min() (e.g. grid boards: grid-template-columns: repeat(N, 1fr) and aspect-ratio:1 for
+  square cells) — never fixed px widths that overflow small screens. Add a @media (max-width:
+  480px) block that shrinks padding/font-size and stacks controls vertically. Tap targets ≥40px.
 - Depth & polish: card gets box-shadow (0 4px 24px rgba(0,0,0,.08)), border-radius 12–16px.
   Inputs get a 1px border, border-radius 8px, and 0.75rem padding.
 - Smooth transitions: all interactive elements (buttons, inputs, links) get

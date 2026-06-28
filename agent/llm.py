@@ -35,21 +35,20 @@ PROVIDERS: dict[str, dict] = {
 }
 
 # Ordered (provider, model) fallback chains. First with a present key + success wins.
-# ponytail: only Groq is verified working on the current keys — the Cerebras model ids
-# 404 (key tier lacks access) and the OpenRouter key is invalid (401). So the chains are
-# Groq-only with real cross-model fallback; re-add other providers when their keys/models
-# are confirmed live.
+# ponytail: cross-provider for resilience — Groq (fast, high TPM) first, then NVIDIA
+# (separate rate limits, so it serves when Groq is throttled), then OpenRouter free as
+# last resort. Verified-live model ids only (Cerebras tier lacks access; NVIDIA/OpenRouter
+# qwen-coder ids are gone). NVIDIA is slower but fine within the ~3-min budget.
 PLANNER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.3-70b-versatile"),
+    ("nvidia", "meta/llama-3.3-70b-instruct"),
     ("groq", "openai/gpt-oss-120b"),
-    ("groq", "llama-3.1-8b-instant"),
 ]
 CODER_CHAIN: list[tuple[str, str]] = [
-    # ponytail: high-TPM models only — the single-pass coder request is large, so a
-    # low-TPM model (llama-3.1-8b-instant, 6000 TPM) can never serve it (always 413).
-    ("groq", "llama-3.3-70b-versatile"),
     ("groq", "openai/gpt-oss-120b"),
-    ("groq", "qwen/qwen3-32b"),
+    ("nvidia", "meta/llama-3.3-70b-instruct"),
+    ("groq", "llama-3.3-70b-versatile"),
+    ("openrouter", "qwen/qwen3-coder:free"),
 ]
 
 _RETRYABLE = (RateLimitError, APIError, APIConnectionError)
