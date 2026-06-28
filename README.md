@@ -1,8 +1,8 @@
 ---
 title: AppSmith API
 emoji: 🔨
-colorFrom: orange
-colorTo: gray
+colorFrom: red
+colorTo: yellow
 sdk: docker
 app_port: 7860
 pinned: false
