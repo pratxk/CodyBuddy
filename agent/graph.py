@@ -42,8 +42,10 @@ def _coder_node(emitter):
         # ponytail: single LLM call — model sees all files together → coherent imports + state
         task_dicts = [{"filepath": t.filepath, "task_description": t.task_description}
                       for t in steps]
+        # ponytail: 8192 fits a multi-file SPA and keeps the request under Groq free-tier
+        # TPM (16384 pushed total request >18k tokens → 413 rate-limit).
         raw = chat(coder_prompt(task_dicts, plan_json),
-                   chain=CODER_CHAIN, system=CODER_SYSTEM_PROMPT, max_tokens=16384)
+                   chain=CODER_CHAIN, system=CODER_SYSTEM_PROMPT, max_tokens=8192)
         files = parse_multi_file_response(raw, strip_code_fences)
         for path in files:
             logger.info("Coder: wrote %s (%d chars)", path, len(files[path]))

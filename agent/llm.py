@@ -45,9 +45,11 @@ PLANNER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.1-8b-instant"),
 ]
 CODER_CHAIN: list[tuple[str, str]] = [
-    ("groq", "openai/gpt-oss-120b"),
+    # ponytail: high-TPM models only — the single-pass coder request is large, so a
+    # low-TPM model (llama-3.1-8b-instant, 6000 TPM) can never serve it (always 413).
     ("groq", "llama-3.3-70b-versatile"),
-    ("groq", "llama-3.1-8b-instant"),
+    ("groq", "openai/gpt-oss-120b"),
+    ("groq", "qwen/qwen3-32b"),
 ]
 
 _RETRYABLE = (RateLimitError, APIError, APIConnectionError)
