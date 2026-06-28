@@ -143,3 +143,42 @@ Output ALL {len(task_steps)} files in this EXACT format — no prose before/afte
 Files to emit (in dependency order — dependencies before consumers): {file_list}
 
 Use EXACTLY the delimiter format above for each file. No other text outside the delimiters."""
+
+
+def vibe_prompt(files: dict[str, str], instruction: str) -> str:
+    """Build the single-call VibeEngineer prompt.
+
+    Embeds current files (=== FILE: === blocks) + instruction and asks for
+    the COMPLETE updated file set in the same delimited format.
+    """
+    current_files_text = "\n".join(
+        f"=== FILE: {path} ===\n{content}" for path, content in files.items()
+    )
+    file_list = ", ".join(files.keys())
+    return f"""You are the VIBE ENGINEER for a React app running in a CodeSandbox Sandpack 'react' sandbox.
+
+The user wants to modify the existing app with the following instruction:
+{instruction}
+
+Current app files:
+{current_files_text}
+
+{DESIGN_GUIDELINES}
+
+RULES:
+- Apply the instruction's changes to the relevant files.
+- Keep ALL other files intact and coherent — no missing imports, no broken references.
+- The result must be a working Sandpack react app (entry /App.js).
+- Maintain design quality: CSS variables, responsive layout, polished UI per DESIGN_GUIDELINES.
+- Emit EVERY file (modified or unchanged) so the full file set is complete.
+
+Output ALL files in this EXACT format — no prose before/after, no markdown fences:
+
+=== FILE: /styles.css ===
+(full file body here)
+=== FILE: /App.js ===
+(full file body here)
+
+Files to emit (all of them, in dependency order): {file_list}
+
+Use EXACTLY the delimiter format above for each file. No other text outside the delimiters."""
