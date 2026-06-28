@@ -55,7 +55,9 @@ def intake(
         intake_prompt(req.prompt, history),
         IntakeStep,
         chain=PLANNER_CHAIN,
-        max_tokens=600,
+        # ponytail: 2000 (not 600) so reasoning-model fallbacks have room to emit the JSON
+        # after their thinking tokens — 600 left them returning no JSON.
+        max_tokens=2000,
     )
 
     # HARD CAP: stop asking after enough questions — force a build.
