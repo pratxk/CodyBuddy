@@ -27,29 +27,38 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # ── Provider configuration ──────────────────────────────────────────────────────
+# Cloudflare Workers AI uses an OpenAI-compatible endpoint whose URL embeds the account id.
+_CF_ACCOUNT = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 PROVIDERS: dict[str, dict] = {
     "groq":       {"base_url": "https://api.groq.com/openai/v1",   "api_key_env": "GROQ_API_KEY"},
+    "cloudflare": {"base_url": f"https://api.cloudflare.com/client/v4/accounts/{_CF_ACCOUNT}/ai/v1",
+                   "api_key_env": "CLOUDFLARE_API_TOKEN"},
     "cerebras":   {"base_url": "https://api.cerebras.ai/v1",        "api_key_env": "CEREBRAS_API_KEY"},
     "openrouter": {"base_url": "https://openrouter.ai/api/v1",      "api_key_env": "OPENROUTER_API_KEY"},
     "nvidia":     {"base_url": "https://integrate.api.nvidia.com/v1","api_key_env": "NVIDIA_API_KEY"},
 }
 
+# Cloudflare GLM is a large reasoning model with slow (60s+) cold starts; give it headroom.
+# ponytail: only cloudflare needs the long timeout; others keep the SDK default.
+_PROVIDER_TIMEOUT: dict[str, float] = {"cloudflare": 180.0}
+
 # Ordered (provider, model) fallback chains. First with a present key + success wins.
-# ponytail: cross-provider for resilience — Groq (fast, high TPM) first, then NVIDIA
-# (separate rate limits, so it serves when Groq is throttled), then OpenRouter free as
-# last resort. Verified-live model ids only (Cerebras tier lacks access; NVIDIA/OpenRouter
-# qwen-coder ids are gone). NVIDIA is slower but fine within the ~3-min budget.
+# ponytail: user-requested order — Groq (fast, high TPM) → Cloudflare GLM-5.2 (strong coder,
+# but 10k neurons/day + slow cold start, so a fallback not the default drain) → NVIDIA
+# (reliable, separate limits) → OpenRouter free (last resort; its free pool 429s often).
+# NVIDIA ahead of OpenRouter because OpenRouter's free models are currently rate-limited.
 PLANNER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.3-70b-versatile"),
+    ("cloudflare", "@cf/zai-org/glm-5.2"),
     ("nvidia", "meta/llama-3.3-70b-instruct"),
-    ("groq", "openai/gpt-oss-120b"),
+    ("openrouter", "meta-llama/llama-3.3-70b-instruct:free"),
 ]
 CODER_CHAIN: list[tuple[str, str]] = [
-    # ponytail: llama-3.3-70b-versatile (12000 TPM) FIRST — it fits the ~10k single-pass
-    # coder request on the fast path. gpt-oss-120b (8000 TPM) 413s on these and is demoted.
+    # ponytail: llama-3.3-70b-versatile (12000 TPM) on the fast path; GLM-5.2 second for
+    # quality when Groq is throttled; NVIDIA reliable third; OpenRouter free last.
     ("groq", "llama-3.3-70b-versatile"),
+    ("cloudflare", "@cf/zai-org/glm-5.2"),
     ("nvidia", "meta/llama-3.3-70b-instruct"),
-    ("groq", "openai/gpt-oss-120b"),
     ("openrouter", "qwen/qwen3-coder:free"),
 ]
 
@@ -67,16 +76,26 @@ def get_client(provider: str) -> OpenAI:
         key = os.environ.get(cfg["api_key_env"])
         if not key:
             raise RuntimeError(f"{cfg['api_key_env']} not set for provider {provider}")
-        _clients[provider] = OpenAI(base_url=cfg["base_url"], api_key=key)
+        if provider == "cloudflare" and not _CF_ACCOUNT:
+            raise RuntimeError("CLOUDFLARE_ACCOUNT_ID not set for provider cloudflare")
+        _clients[provider] = OpenAI(
+            base_url=cfg["base_url"], api_key=key,
+            timeout=_PROVIDER_TIMEOUT.get(provider, 120.0),
+        )
     return _clients[provider]
 
 
+def _provider_ready(p: str) -> bool:
+    if not os.environ.get(PROVIDERS[p]["api_key_env"]):
+        return False
+    if p == "cloudflare" and not _CF_ACCOUNT:  # token without account id is unusable
+        return False
+    return True
+
+
 def usable_chain(chain: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Drop chain entries whose provider has no API key in the environment."""
-    return [
-        (p, m) for (p, m) in chain
-        if os.environ.get(PROVIDERS[p]["api_key_env"])
-    ]
+    """Drop chain entries whose provider is not fully configured (key, and for CF, account)."""
+    return [(p, m) for (p, m) in chain if _provider_ready(p)]
 
 
 def chat(
