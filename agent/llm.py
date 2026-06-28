@@ -63,13 +63,16 @@ PLANNER_CHAIN: list[tuple[str, str]] = [
     ("nvidia", "meta/llama-3.3-70b-instruct"),
     ("openrouter", "meta-llama/llama-3.3-70b-instruct:free"),
 ]
+# ponytail: coder requests are large (max_tokens=14000 for rich apps) → Groq's 12k TPM 413s,
+# so lead with high-capacity providers (Cerebras 1M/day+fast, Gemini 1M-ctx, NVIDIA, GLM).
+# Groq is a late fallback (it'll 413 on this size and fall through harmlessly).
 CODER_CHAIN: list[tuple[str, str]] = [
-    ("groq", "llama-3.3-70b-versatile"),
     ("cerebras", "gpt-oss-120b"),
     ("gemini", "gemini-2.5-flash"),
-    ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
-    ("cloudflare", "@cf/zai-org/glm-5.2"),
     ("nvidia", "meta/llama-3.3-70b-instruct"),
+    ("cloudflare", "@cf/zai-org/glm-5.2"),
+    ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
+    ("groq", "llama-3.3-70b-versatile"),
     ("openrouter", "qwen/qwen3-coder:free"),
 ]
 

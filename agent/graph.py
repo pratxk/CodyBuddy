@@ -29,10 +29,9 @@ def _planner_node(emitter):
 def _architect_node(emitter):
     def node(state: dict) -> dict:
         plan: Plan = state["plan"]
-        # ponytail: 8000 — the TaskPlan JSON (per-file task descriptions) was truncating at
-        # 2000 ("Unterminated string"); reasoning fallbacks need extra headroom too.
+        # ponytail: 10000 — richer apps = more files/steps in the TaskPlan JSON.
         task_plan = chat_structured(architect_prompt(plan.model_dump_json(indent=2)),
-                                    TaskPlan, chain=PLANNER_CHAIN, max_tokens=8000)
+                                    TaskPlan, chain=PLANNER_CHAIN, max_tokens=10000)
         if emitter:
             emitter.end_current(ok=True); emitter.start_next()
         return {"plan": plan, "task_plan": task_plan, "plan_json": plan.model_dump_json()}
@@ -46,10 +45,11 @@ def _coder_node(emitter):
         # ponytail: single LLM call — model sees all files together → coherent imports + state
         task_dicts = [{"filepath": t.filepath, "task_description": t.task_description}
                       for t in steps]
-        # ponytail: 8192 fits a multi-file SPA and keeps the request under Groq free-tier
-        # TPM (16384 pushed total request >18k tokens → 413 rate-limit).
+        # ponytail: 14000 lets the coder build rich, multi-component apps (dashboards w/ charts).
+        # This exceeds Groq's 12k TPM, so CODER_CHAIN leads with Cerebras (high TPM, 1M/day) —
+        # Groq stays a late fallback (it'll 413 on this size and fall through).
         raw = chat(coder_prompt(task_dicts, plan_json),
-                   chain=CODER_CHAIN, system=CODER_SYSTEM_PROMPT, max_tokens=8192)
+                   chain=CODER_CHAIN, system=CODER_SYSTEM_PROMPT, max_tokens=14000)
         files = parse_multi_file_response(raw, strip_code_fences)
         for path in files:
             logger.info("Coder: wrote %s (%d chars)", path, len(files[path]))

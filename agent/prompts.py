@@ -6,8 +6,19 @@ DESIGN_GUIDELINES = """DESIGN REQUIREMENTS (non-negotiable — the app must look
 - Accent: apply a subtle linear-gradient (e.g. 135deg from --color-primary to --color-accent)
   to the page header/hero banner and to primary buttons. Not everywhere — just the focal points.
 - Type scale: body 1rem, headings 1.5–2rem, captions/labels 0.8125rem. System font stack.
-- Layout: center the main UI in a card/container (max-width ~640px, auto margins, comfortable
-  padding 1.5–2rem). Page bg should differ from card surface.
+- Layout — MATCH THE APP TYPE (do NOT cram everything into one tiny card):
+    * Simple single-purpose apps (calculator, timer, single game, one form): a centered
+      card, max-width ~640px.
+    * Data-rich / dashboard / multi-section / tool / SaaS apps: a FULL-WIDTH APP SHELL
+      (max-width ~1200–1400px, auto margins) with a real responsive layout — a header/toolbar,
+      and a CSS-grid of multiple panels/cards (e.g. grid-template-columns: repeat(auto-fit,
+      minmax(260px, 1fr))). Dashboards must have MULTIPLE metric/stat cards AND one or more
+      charts AND a data table or list — never a single lonely chart.
+  Page bg should differ from card/panel surface.
+- DATA VISUALISATION: for any charts/graphs, USE A REAL CHART LIBRARY via npm (Sandpack
+  resolves it from CDN) — prefer `recharts` (LineChart/AreaChart/BarChart/PieChart +
+  ResponsiveContainer) over hand-drawn divs. Add it to package.json dependencies. Charts must
+  be responsive (wrap in ResponsiveContainer) and use the palette tokens.
 - RESPONSIVE (required): the app must look good from 320px phones to wide desktops. Use a
   fluid container (width:100%; max-width:Npx; margin:auto) and box-sizing:border-box. Never
   cause horizontal scroll. Build grids/rows with CSS grid/flex that reflow; size cells with
@@ -47,20 +58,28 @@ User's original request: {prompt}
 Answers gathered so far:
 {history_text}
 
+You are a SENIOR product engineer scoping a build. Ask the sharp, high-leverage questions a
+pro would ask before building — but never interrogate past what changes the build.
+
 Decision rules:
-- STRONG DEFAULT: BUILD, don't interrogate. If the request names a recognizable app/feature
-  and you can picture a sensible first version, return ready=true — even if details are
-  unspecified (pick reasonable defaults in the brief). Examples that are READY:
-  "a tic-tac-toe game with score", "a markdown note app", "a pomodoro timer", "a calculator",
-  "a weather card", "a todo list". Do NOT ask questions just to collect nice-to-have details
-  (colors, themes, extra features) — the user can refine later by chatting.
-- Only return ready=false when the request is GENUINELY underspecified — you cannot tell what
-  the app even IS (e.g. "build me an app", "make something cool", "a dashboard" with no domain).
-  Then ask the SINGLE most useful next `question` + 2-4 concrete, short, selectable `options`
-  (highest-leverage unknown first: what kind of app → core feature), ONE at a time, building
-  on prior answers. Never repeat an answered question.
-- When ready, write the `brief` as 1-3 sentences, folding in every answer above and filling
-  any gaps with sensible defaults.
+- TRIVIAL, well-specified apps → BUILD NOW (ready=true). If it's a small single-purpose app and
+  the request already names it, don't ask anything: "tic-tac-toe with score", "a pomodoro timer",
+  "a calculator", "a markdown note app", "a todo list" → ready=true, sensible defaults in the brief.
+- NON-TRIVIAL apps (dashboards, trackers, tools, SaaS, anything with data / multiple
+  views / workflows / users) → ASK 2-4 SHARP questions before building (you have a 5-question
+  budget — use what's needed, then build). Each question targets a decision that materially
+  changes the app. Examples of GOOD questions (adapt to the request, never ask all generically):
+    * Dashboard: "What is this dashboard tracking?" (options: Sales/revenue, Web analytics,
+      Server/infra metrics, Crypto/markets) → then "Which KPIs matter most?" → "Static snapshot
+      or live-updating in real time?" → "Any key interactions?" (filter by date range, drill into
+      a metric, compare periods).
+    * Tracker/tool: what's the core entity, what actions, what should the main view show.
+  Ask ONE question per turn with 2-4 concrete, short, selectable `options`; build on prior
+  answers; never repeat an answered one; don't ask about pure cosmetics (colors/theme) — those
+  are refined later by chat.
+- Stop asking and set ready=true as soon as you have enough to build a genuinely capable version
+  (usually after 2-4 answers for complex apps). When ready, write a RICH `brief` (2-4 sentences)
+  that folds in every answer and names the concrete features/metrics/charts/interactions to build.
 
 Respond with ONLY valid JSON — no prose, no markdown, no code fences:
 {{
@@ -88,8 +107,14 @@ Rules:
 - Output a CLIENT-SIDE React SPA only (no server, no Node backend, no native deps).
 - Entry component MUST be /App.js. Put extra components under /components/.
 - ALWAYS include a /styles.css file in the plan (the app must be styled, not bare HTML).
-- Use only npm packages resolvable from a CDN (e.g. react, react-dom, common UI libs).
-- Keep the feature scope minimal but the UI visually polished and complete.
+- Use npm packages resolvable from a CDN — react, react-dom, and for data viz prefer
+  `recharts`; date-fns for dates; etc. List them in techStack.
+- AMBITION: design a genuinely CAPABLE, production-feeling first version — NOT a toy. Decompose
+  into several real components (5-9 files is normal for a rich app). For a "dashboard", plan
+  MULTIPLE metric cards, 2+ charts (different types), a data table/list, and filters/controls;
+  if the user said "real-time", plan simulated live data that updates on an interval. Cover the
+  core feature deeply with sensible realistic seed data — a reviewer should think "this is a
+  real app", not "this is a demo stub".
 
 {DESIGN_GUIDELINES}
 
@@ -175,13 +200,24 @@ Implementation steps (for ALL files you must produce):
 FUNCTIONAL COMPLETENESS RULES (non-negotiable):
 - App.js MUST render the ENTIRE feature UI — not just a shell.
 - EVERY component imported by ANY file must be defined in this response.
-- ONE source of truth for all game/app state: lift state to App.js and pass props down.
+- ONE source of truth for app state: lift shared state to App.js and pass props down.
   Components must NOT declare their own duplicate state for data passed as props.
-- For boards/grids: use CSS Grid (display:grid; grid-template-columns:repeat(N,1fr)) with
-  explicit cell size (min 80px), visible borders (2px solid var(--color-border)), and
-  cursor:pointer. Show X/O inside cells as large text (font-size:2rem+). Must be a REAL
-  playable board, not just text.
-- Score logic must be wired to actual game outcomes (wins/draws), not placeholder.
+
+BUILD A CAPABLE, PRODUCTION-FEELING APP — NOT A STUB:
+- Implement the FULL feature set from the plan with real interactivity — not a single widget
+  with one piece of dummy data. A reviewer should think "this is a real app".
+- DASHBOARDS specifically: render MULTIPLE distinct metric/stat cards (with value, label, and
+  a delta/trend), 2+ charts of DIFFERENT types via `recharts` (e.g. an area/line trend + a
+  bar/pie breakdown, each in <ResponsiveContainer>), AND a data table or list. Add working
+  filters/controls (time range, category) that actually filter the rendered data. Seed with
+  rich, realistic data (15-30+ points), not 3 dummy rows.
+- "REAL-TIME": simulate live data with a useEffect setInterval that updates state every
+  1-2s (append a new point, shift the window, recompute metrics); clear the interval on
+  unmount. Add a subtle "live" pulse indicator.
+- GAMES/grids: CSS Grid with sized bordered clickable cells (font-size:2rem+ for marks);
+  real win/score logic wired to outcomes — a real playable board, not text.
+- Charts via recharts must be wrapped in <ResponsiveContainer width="100%" height={...}> and
+  use the palette tokens; add recharts to /package.json dependencies.
 
 Output ALL {len(task_steps)} files in this EXACT format — no prose before/after, no markdown fences around the file delimiter lines:
 
@@ -230,10 +266,16 @@ Current app files:
 {DESIGN_GUIDELINES}
 
 RULES:
-- Apply the instruction's changes to the relevant files.
+- Apply the instruction FULLY and AMBITIOUSLY. If the user asks to "add features" or "enhance"
+  or "make it real-time", implement substantial, complete functionality — add new components,
+  charts, interactions, state and realistic data as needed; do NOT do the bare minimum (e.g.
+  don't answer "enhance this dashboard" with just one date filter). Match the depth a senior
+  engineer would ship. New chart needs → use recharts (add to package.json). Real-time →
+  setInterval-updating state cleaned up on unmount.
 - Keep ALL other files intact and coherent — no missing imports, no broken references.
-- The result must be a working Sandpack react app (entry /App.js).
-- Maintain design quality: CSS variables, responsive layout, polished UI per DESIGN_GUIDELINES.
+- The result must be a working Sandpack react app (entry /App.js) that mounts with NO errors.
+- Maintain/raise design quality per DESIGN_GUIDELINES (app-appropriate layout, not a tiny card
+  for a data app; responsive; polished).
 - Emit EVERY file (modified or unchanged) so the full file set is complete.
 
 Output ALL files in this EXACT format — no prose before/after, no markdown fences:

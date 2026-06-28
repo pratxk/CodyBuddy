@@ -32,6 +32,71 @@ BASE_DEPENDENCIES: dict[str, str] = {
     "react-dom": "^18.2.0",
 }
 
+# Known-good versions for libs the coder commonly reaches for; anything else → "latest".
+_KNOWN_VERSIONS: dict[str, str] = {
+    "recharts": "^2.15.0",
+    "date-fns": "^3.6.0",
+    "lucide-react": "^0.460.0",
+    "framer-motion": "^11.11.0",
+    "clsx": "^2.1.1",
+    "uuid": "^9.0.1",
+    "nanoid": "^5.0.0",
+    "zustand": "^4.5.0",
+}
+# import sources that are NOT npm packages to install.
+_NON_PKG_PREFIXES = (".", "/")
+_BUILTIN_PKGS = {"react", "react-dom"}
+
+_IMPORT_RE = re.compile(r"""(?:import\s[^'"]*?from\s|import\s|from\s)['"]([^'"]+)['"]""")
+
+
+def _package_name(source: str) -> str | None:
+    """Resolve an import source to its npm package name (handles scopes + subpaths)."""
+    if source.startswith(_NON_PKG_PREFIXES):
+        return None
+    parts = source.split("/")
+    name = "/".join(parts[:2]) if source.startswith("@") else parts[0]
+    return name or None
+
+
+def ensure_dependencies(files: dict[str, str]) -> dict[str, str]:
+    """Scan all JS/TS files for bare npm imports and add any missing ones to /package.json.
+
+    ponytail: the coder sometimes imports a lib (e.g. recharts) without listing it in
+    package.json → Sandpack can't resolve it. This guarantees every imported package is
+    declared so the preview always boots.
+    """
+    pkg_key = "/package.json" if "/package.json" in files else "package.json"
+    if pkg_key not in files:
+        return files
+    try:
+        pkg = json.loads(files[pkg_key])
+    except (json.JSONDecodeError, TypeError):
+        return files
+    deps: dict[str, str] = pkg.get("dependencies", {}) or {}
+
+    imported: set[str] = set()
+    for path, content in files.items():
+        if not path.endswith((".js", ".jsx", ".ts", ".tsx")) or not isinstance(content, str):
+            continue
+        for src in _IMPORT_RE.findall(content):
+            name = _package_name(src)
+            if name and name not in _BUILTIN_PKGS:
+                imported.add(name)
+
+    changed = False
+    for name in imported:
+        if name not in deps:
+            deps[name] = _KNOWN_VERSIONS.get(name, "latest")
+            changed = True
+    if not changed:
+        return files
+
+    pkg["dependencies"] = deps
+    out = dict(files)
+    out[pkg_key] = json.dumps(pkg, indent=2)
+    return out
+
 
 def default_package_json(name: str, extra_deps: dict[str, str] | None = None) -> str:
     deps = dict(BASE_DEPENDENCIES)
@@ -59,7 +124,7 @@ def normalize_files(files: dict[str, str]) -> dict[str, str]:
         )
     if "/package.json" not in out:
         out["/package.json"] = default_package_json("sandbox-app")
-    return out
+    return ensure_dependencies(out)  # auto-declare any imported npm packages
 
 
 def is_sandpack_shaped(files: dict[str, str]) -> bool:
