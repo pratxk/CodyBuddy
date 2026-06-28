@@ -48,15 +48,19 @@ Answers gathered so far:
 {history_text}
 
 Decision rules:
-- If the request is ALREADY specific enough to build a sensible first version
-  (e.g. "a tic-tac-toe game with score", "a markdown note-taking app with tags"),
-  return ready=true with a consolidated `brief`: 1-3 sentences capturing exactly what
-  to build, folding in every answer above. Leave question/options empty.
-- If it is too vague (e.g. "build me an app", "a dashboard"), return ready=false with
-  the SINGLE most useful next `question` plus 2-4 concrete, short, selectable `options`.
-  Ask the highest-leverage unknown first (what kind of app, then core feature, then style),
-  ONE question at a time, building on prior answers. Never repeat an answered question.
-- Ask no more than truly needed — prefer building once you have a clear concept.
+- STRONG DEFAULT: BUILD, don't interrogate. If the request names a recognizable app/feature
+  and you can picture a sensible first version, return ready=true — even if details are
+  unspecified (pick reasonable defaults in the brief). Examples that are READY:
+  "a tic-tac-toe game with score", "a markdown note app", "a pomodoro timer", "a calculator",
+  "a weather card", "a todo list". Do NOT ask questions just to collect nice-to-have details
+  (colors, themes, extra features) — the user can refine later by chatting.
+- Only return ready=false when the request is GENUINELY underspecified — you cannot tell what
+  the app even IS (e.g. "build me an app", "make something cool", "a dashboard" with no domain).
+  Then ask the SINGLE most useful next `question` + 2-4 concrete, short, selectable `options`
+  (highest-leverage unknown first: what kind of app → core feature), ONE at a time, building
+  on prior answers. Never repeat an answered question.
+- When ready, write the `brief` as 1-3 sentences, folding in every answer above and filling
+  any gaps with sensible defaults.
 
 Respond with ONLY valid JSON — no prose, no markdown, no code fences:
 {{
