@@ -4,7 +4,7 @@ SQLAlchemy ORM models for CodyBuddy.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Index, String, Text
+from sqlalchemy import DateTime, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,5 +31,4 @@ class Project(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
-
-    __table_args__ = (Index("ix_projects_session_id", "session_id"),)
+    # ponytail: index=True on the column handles ix_projects_session_id; no __table_args__ needed
