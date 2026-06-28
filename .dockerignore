@@ -5,3 +5,9 @@ __pycache__/
 generated_project/
 .code-review-graph/
 tests/
+.env
+.env.*
+.superpowers/
+.claude/
+*.md
+docs/

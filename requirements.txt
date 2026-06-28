@@ -1,8 +1,21 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-langgraph==1.2.1
-openai==1.59.6
-pydantic==2.10.5
-python-dotenv==1.0.1
-pytest==8.3.4
-httpx==0.28.1
+# Web framework
+fastapi==0.138.1
+uvicorn[standard]==0.49.0
+
+# AI / agent
+langgraph==1.1.10
+openai==2.36.0
+
+# Validation / config
+pydantic==2.13.4
+python-dotenv==1.2.2
+email-validator==2.3.0
+
+# Database (Neon Postgres)
+sqlalchemy==2.0.51
+psycopg2-binary==2.9.12
+
+# Auth
+bcrypt==5.0.0
+pyjwt==2.13.0
+google-auth==2.52.0

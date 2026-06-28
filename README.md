@@ -1,7 +1,21 @@
-# CodyBuddy
+---
+title: AppSmith API
+emoji: 🔨
+colorFrom: orange
+colorTo: gray
+sdk: docker
+app_port: 7860
+pinned: false
+---
 
-A small LangGraph build agent: **planner → architect → coder**. Give it a
-natural-language prompt and it writes a working app into `./generated_project`.
+# AppSmith API (CodyBuddy engine)
+
+A LangGraph build agent: **planner → architect → coder**, plus VibeEngineer,
+OnCall auto-repair, IntakeAgent, per-user Neon persistence, and a 7-provider
+$0 model fallback chain. Serves the AppSmith frontend over FastAPI + SSE.
+
+> Configuration (API keys, POSTGRES_URL, JWT_SECRET, GOOGLE_CLIENT_ID,
+> ALLOWED_ORIGINS) is provided via **Space secrets**, never committed.
 
 ## Usage
 
