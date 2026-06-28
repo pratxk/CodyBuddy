@@ -35,15 +35,19 @@ PROVIDERS: dict[str, dict] = {
 }
 
 # Ordered (provider, model) fallback chains. First with a present key + success wins.
+# ponytail: only Groq is verified working on the current keys — the Cerebras model ids
+# 404 (key tier lacks access) and the OpenRouter key is invalid (401). So the chains are
+# Groq-only with real cross-model fallback; re-add other providers when their keys/models
+# are confirmed live.
 PLANNER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.3-70b-versatile"),
-    ("cerebras", "llama-3.3-70b"),
-    ("openrouter", "meta-llama/llama-3.3-70b-instruct:free"),
+    ("groq", "openai/gpt-oss-120b"),
+    ("groq", "llama-3.1-8b-instant"),
 ]
 CODER_CHAIN: list[tuple[str, str]] = [
-    ("cerebras", "qwen-3-coder-480b"),
+    ("groq", "openai/gpt-oss-120b"),
     ("groq", "llama-3.3-70b-versatile"),
-    ("openrouter", "qwen/qwen-2.5-coder-32b-instruct:free"),
+    ("groq", "llama-3.1-8b-instant"),
 ]
 
 _RETRYABLE = (RateLimitError, APIError, APIConnectionError)

@@ -1,5 +1,4 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
@@ -7,14 +6,12 @@ from langgraph.graph import END, START, StateGraph
 from agent.llm import CODER_CHAIN, PLANNER_CHAIN, chat, chat_structured, strip_code_fences
 from agent.prompts import (CODER_SYSTEM_PROMPT, architect_prompt,
                            coder_prompt, planner_prompt)
-from agent.scaffold import normalize_files
-from agent.states import ImplementationTask, Plan, TaskPlan
+from agent.scaffold import normalize_files, parse_multi_file_response
+from agent.states import Plan, TaskPlan
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("codybuddy")
-
-MAX_CONCURRENCY = 6
 
 
 def _planner_node(emitter):
@@ -38,27 +35,18 @@ def _architect_node(emitter):
     return node
 
 
-def _code_one(task: ImplementationTask, plan_json: str) -> tuple[str, str]:
-    raw = chat(coder_prompt(task.task_description, task.filepath, "", plan_json),
-               chain=CODER_CHAIN, system=CODER_SYSTEM_PROMPT, max_tokens=4096)
-    return task.filepath, strip_code_fences(raw)
-
-
 def _coder_node(emitter):
     def node(state: dict) -> dict:
         steps = state["task_plan"].implementation_steps
         plan_json = state["plan_json"]
-        files: dict[str, str] = {}
-        workers = min(MAX_CONCURRENCY, max(1, len(steps)))
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {pool.submit(_code_one, t, plan_json): t for t in steps}
-            for fut in as_completed(futures):
-                try:
-                    path, content = fut.result()
-                    files[path] = content
-                    logger.info("Coder: wrote %s", path)
-                except Exception as exc:  # noqa: BLE001
-                    logger.error("Coder: failed %s — %s", futures[fut].filepath, exc)
+        # ponytail: single LLM call — model sees all files together → coherent imports + state
+        task_dicts = [{"filepath": t.filepath, "task_description": t.task_description}
+                      for t in steps]
+        raw = chat(coder_prompt(task_dicts, plan_json),
+                   chain=CODER_CHAIN, system=CODER_SYSTEM_PROMPT, max_tokens=16384)
+        files = parse_multi_file_response(raw, strip_code_fences)
+        for path in files:
+            logger.info("Coder: wrote %s (%d chars)", path, len(files[path]))
         if emitter:
             emitter.end_current(ok=True)
         return {"plan": state["plan"], "files": normalize_files(files)}

@@ -1,6 +1,31 @@
 import json
+import re
 
 SANDPACK_TEMPLATE = "react"
+
+_FILE_HEADER_RE = re.compile(r"^=== FILE: (.+?) ===$", re.MULTILINE)
+
+
+def parse_multi_file_response(raw: str, strip_fences_fn) -> dict[str, str]:
+    """Parse a delimited multi-file LLM response into a filepath→content dict.
+
+    Expected format:
+        === FILE: /App.js ===
+        <file body>
+        === FILE: /styles.css ===
+        <file body>
+    """
+    matches = list(_FILE_HEADER_RE.finditer(raw))
+    if not matches:
+        raise ValueError("No file headers found in coder response (expected '=== FILE: /path ===').")
+    files: dict[str, str] = {}
+    for i, match in enumerate(matches):
+        filepath = match.group(1).strip()
+        start = match.end() + 1  # skip the newline after the header
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(raw)
+        body = raw[start:end]
+        files[filepath] = strip_fences_fn(body)
+    return files
 
 BASE_DEPENDENCIES: dict[str, str] = {
     "react": "^18.2.0",

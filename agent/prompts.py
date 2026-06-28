@@ -77,38 +77,58 @@ Respond with ONLY valid JSON — no prose, no markdown, no code fences:
 
 
 CODER_SYSTEM_PROMPT = (
-    "You are the CODER. You implement one React file at a time, completely and correctly, "
+    "You are the CODER. You implement ALL files of a React app in ONE response, "
     "for a CodeSandbox Sandpack 'react' sandbox (entry /App.js). Use modern function "
     "components and hooks. Use ES module imports/exports. Import sibling files by their "
     "path (e.g. import Board from './components/Board'). /App.js MUST import \"./styles.css\". "
-    "Only use CDN-resolvable npm packages. Never reference files that do not exist in the plan. "
+    "Only use CDN-resolvable npm packages. "
+    "CRITICAL: EVERY file imported in any component MUST be emitted in this response — "
+    "no orphan imports, no missing files. ONE source of truth for state: lift shared state "
+    "to App.js and pass props down; never have two components independently owning the same state. "
+    "The core feature must WORK and be VISIBLE: games/boards need real CSS grids with sized, "
+    "bordered, clickable cells. "
     "PRODUCE VISUALLY POLISHED UIs: use CSS variables for color tokens, a gradient accent on "
     "header/primary buttons, system font stack, rem-based type scale, comfortable spacing, "
     "rounded corners (12-16px), soft box-shadows, a centered responsive card, smooth "
     "transitions (0.2s ease) on all interactive elements, hover/active states, "
     "focus-visible outlines for accessibility, and a fadeInUp keyframe on the main card. "
-    "When the file is /styles.css, write real, complete, modern CSS — never empty or placeholder."
+    "When writing /styles.css, write real, complete, modern CSS — never empty or placeholder."
 )
 
 
-def coder_prompt(task_description: str, filepath: str, existing_content: str, plan_json: str) -> str:
-    existing = existing_content if existing_content else "(file does not exist yet)"
-    return f"""Project plan (for context):
+def coder_prompt(task_steps: list[dict], plan_json: str) -> str:
+    """Build the single-call prompt that generates ALL app files at once."""
+    steps_text = "\n".join(
+        f"  {i+1}. {s['filepath']}: {s['task_description']}"
+        for i, s in enumerate(task_steps)
+    )
+    file_list = ", ".join(s["filepath"] for s in task_steps)
+    return f"""Project plan:
 {plan_json}
 
-Implement this file for a Sandpack 'react' sandbox:
-- File: {filepath}
-- Task: {task_description}
+Implementation steps (for ALL files you must produce):
+{steps_text}
 
 {DESIGN_GUIDELINES}
 
-Reminders:
-- If this is /App.js, include: import "./styles.css"; near the top.
-- If this is /styles.css, write complete, attractive, modern CSS covering layout, the
-  container/card, typography, and every button/input with hover/active/focus states.
+FUNCTIONAL COMPLETENESS RULES (non-negotiable):
+- App.js MUST render the ENTIRE feature UI — not just a shell.
+- EVERY component imported by ANY file must be defined in this response.
+- ONE source of truth for all game/app state: lift state to App.js and pass props down.
+  Components must NOT declare their own duplicate state for data passed as props.
+- For boards/grids: use CSS Grid (display:grid; grid-template-columns:repeat(N,1fr)) with
+  explicit cell size (min 80px), visible borders (2px solid var(--color-border)), and
+  cursor:pointer. Show X/O inside cells as large text (font-size:2rem+). Must be a REAL
+  playable board, not just text.
+- Score logic must be wired to actual game outcomes (wins/draws), not placeholder.
 
-Existing content:
-{existing}
+Output ALL {len(task_steps)} files in this EXACT format — no prose before/after, no markdown fences around the file delimiter lines:
 
-Output the COMPLETE final contents of {filepath} and NOTHING else.
-No commentary, no explanations, no markdown code fences — just the raw file body."""
+=== FILE: /styles.css ===
+(full file body here)
+=== FILE: /App.js ===
+(full file body here)
+
+Files to emit (in dependency order — dependencies before consumers): {file_list}
+
+Use EXACTLY the delimiter format above for each file. No other text outside the delimiters."""
