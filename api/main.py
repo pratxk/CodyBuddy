@@ -6,6 +6,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from api.auth import router as auth_router
 from api.enhance import router as enhance_router
 from api.generate import router as generate_router, shutdown_executor
 from api.intake import router as intake_router
@@ -39,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router, prefix="/api")
 app.include_router(generate_router, prefix="/api")
 app.include_router(enhance_router, prefix="/api")
 app.include_router(oncall_router, prefix="/api")
