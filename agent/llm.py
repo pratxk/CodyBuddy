@@ -45,9 +45,11 @@ PLANNER_CHAIN: list[tuple[str, str]] = [
     ("groq", "openai/gpt-oss-120b"),
 ]
 CODER_CHAIN: list[tuple[str, str]] = [
-    ("groq", "openai/gpt-oss-120b"),
-    ("nvidia", "meta/llama-3.3-70b-instruct"),
+    # ponytail: llama-3.3-70b-versatile (12000 TPM) FIRST — it fits the ~10k single-pass
+    # coder request on the fast path. gpt-oss-120b (8000 TPM) 413s on these and is demoted.
     ("groq", "llama-3.3-70b-versatile"),
+    ("nvidia", "meta/llama-3.3-70b-instruct"),
+    ("groq", "openai/gpt-oss-120b"),
     ("openrouter", "qwen/qwen3-coder:free"),
 ]
 
