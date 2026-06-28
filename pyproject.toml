@@ -5,6 +5,9 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
+    "bcrypt>=4",
+    "email-validator>=2",
+    "google-auth>=2.37",
     "groq>=0.31.0",
     "langchain>=0.3.27",
     "langchain-core>=0.3.72",
@@ -17,6 +20,7 @@ dependencies = [
     "pip>=25.2",
     "psycopg2-binary>=2.9",
     "pydantic>=2.11.7",
+    "pyjwt>=2.10",
     "python-dotenv>=1.1.1",
     "sqlalchemy>=2.0",
 ]
@@ -31,3 +35,6 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+markers = [
+    "real_auth: use real auth dependency (no get_current_user override)",
+]
