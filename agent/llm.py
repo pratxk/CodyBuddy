@@ -31,9 +31,12 @@ logger = logging.getLogger(__name__)
 _CF_ACCOUNT = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
 PROVIDERS: dict[str, dict] = {
     "groq":       {"base_url": "https://api.groq.com/openai/v1",   "api_key_env": "GROQ_API_KEY"},
+    "cerebras":   {"base_url": "https://api.cerebras.ai/v1",        "api_key_env": "CEREBRAS_API_KEY"},
+    "gemini":     {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                   "api_key_env": "GEMINI_API_KEY"},
+    "sambanova":  {"base_url": "https://api.sambanova.ai/v1",       "api_key_env": "SAMBANOVA_API_KEY"},
     "cloudflare": {"base_url": f"https://api.cloudflare.com/client/v4/accounts/{_CF_ACCOUNT}/ai/v1",
                    "api_key_env": "CLOUDFLARE_API_TOKEN"},
-    "cerebras":   {"base_url": "https://api.cerebras.ai/v1",        "api_key_env": "CEREBRAS_API_KEY"},
     "openrouter": {"base_url": "https://openrouter.ai/api/v1",      "api_key_env": "OPENROUTER_API_KEY"},
     "nvidia":     {"base_url": "https://integrate.api.nvidia.com/v1","api_key_env": "NVIDIA_API_KEY"},
 }
@@ -47,12 +50,15 @@ _PROVIDER_TIMEOUT: dict[str, float] = {"cloudflare": 180.0}
 # but 10k neurons/day + slow cold start, so a fallback not the default drain) → NVIDIA
 # (reliable, separate limits) → OpenRouter free (last resort; its free pool 429s often).
 # NVIDIA ahead of OpenRouter because OpenRouter's free models are currently rate-limited.
-# ponytail: TWO fast providers up front (Groq 100k tok/day, Cerebras 1M tok/day) so when
-# Groq's daily cap is hit, Cerebras still serves FAST — only then fall to the slower
-# Cloudflare GLM (quality, 10k neurons/day) → NVIDIA (reliable) → OpenRouter (free, flaky).
+# ponytail: FOUR fast providers up front (Groq 100k/day, Cerebras 1M/day, Gemini ~250-1000
+# RPD + 1M ctx, SambaNova fast/low-RPM) so a single provider's cap never drops us to the
+# slow tier — only then Cloudflare GLM (quality, 10k neurons/day) → NVIDIA (reliable) →
+# OpenRouter (free, flaky). All seven verified live to produce valid Sandpack apps.
 PLANNER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.3-70b-versatile"),
     ("cerebras", "gpt-oss-120b"),
+    ("gemini", "gemini-2.5-flash"),
+    ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
     ("cloudflare", "@cf/zai-org/glm-5.2"),
     ("nvidia", "meta/llama-3.3-70b-instruct"),
     ("openrouter", "meta-llama/llama-3.3-70b-instruct:free"),
@@ -60,6 +66,8 @@ PLANNER_CHAIN: list[tuple[str, str]] = [
 CODER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.3-70b-versatile"),
     ("cerebras", "gpt-oss-120b"),
+    ("gemini", "gemini-2.5-flash"),
+    ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
     ("cloudflare", "@cf/zai-org/glm-5.2"),
     ("nvidia", "meta/llama-3.3-70b-instruct"),
     ("openrouter", "qwen/qwen3-coder:free"),
