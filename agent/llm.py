@@ -47,16 +47,19 @@ _PROVIDER_TIMEOUT: dict[str, float] = {"cloudflare": 180.0}
 # but 10k neurons/day + slow cold start, so a fallback not the default drain) → NVIDIA
 # (reliable, separate limits) → OpenRouter free (last resort; its free pool 429s often).
 # NVIDIA ahead of OpenRouter because OpenRouter's free models are currently rate-limited.
+# ponytail: TWO fast providers up front (Groq 100k tok/day, Cerebras 1M tok/day) so when
+# Groq's daily cap is hit, Cerebras still serves FAST — only then fall to the slower
+# Cloudflare GLM (quality, 10k neurons/day) → NVIDIA (reliable) → OpenRouter (free, flaky).
 PLANNER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.3-70b-versatile"),
+    ("cerebras", "gpt-oss-120b"),
     ("cloudflare", "@cf/zai-org/glm-5.2"),
     ("nvidia", "meta/llama-3.3-70b-instruct"),
     ("openrouter", "meta-llama/llama-3.3-70b-instruct:free"),
 ]
 CODER_CHAIN: list[tuple[str, str]] = [
-    # ponytail: llama-3.3-70b-versatile (12000 TPM) on the fast path; GLM-5.2 second for
-    # quality when Groq is throttled; NVIDIA reliable third; OpenRouter free last.
     ("groq", "llama-3.3-70b-versatile"),
+    ("cerebras", "gpt-oss-120b"),
     ("cloudflare", "@cf/zai-org/glm-5.2"),
     ("nvidia", "meta/llama-3.3-70b-instruct"),
     ("openrouter", "qwen/qwen3-coder:free"),
