@@ -28,6 +28,52 @@ DESIGN_GUIDELINES = """DESIGN REQUIREMENTS (non-negotiable — the app must look
   Avoid unstyled browser defaults. Write REAL, complete CSS — never empty or placeholder."""
 
 
+def intake_prompt(prompt: str, history: list[dict]) -> str:
+    """Build the INTAKE self-gating prompt.
+
+    history is a list of {"question": str, "answer": str} already collected.
+    """
+    if history:
+        history_text = "\n".join(
+            f"  Q: {h['question']}\n  A: {h['answer']}" for h in history
+        )
+    else:
+        history_text = "  (none yet)"
+    return f"""You are the INTAKE agent for an app generator that builds small React SPAs.
+Decide whether the user's request is specific enough to build a good first version.
+
+User's original request: {prompt}
+
+Answers gathered so far:
+{history_text}
+
+Decision rules:
+- If the request is ALREADY specific enough to build a sensible first version
+  (e.g. "a tic-tac-toe game with score", "a markdown note-taking app with tags"),
+  return ready=true with a consolidated `brief`: 1-3 sentences capturing exactly what
+  to build, folding in every answer above. Leave question/options empty.
+- If it is too vague (e.g. "build me an app", "a dashboard"), return ready=false with
+  the SINGLE most useful next `question` plus 2-4 concrete, short, selectable `options`.
+  Ask the highest-leverage unknown first (what kind of app, then core feature, then style),
+  ONE question at a time, building on prior answers. Never repeat an answered question.
+- Ask no more than truly needed — prefer building once you have a clear concept.
+
+Respond with ONLY valid JSON — no prose, no markdown, no code fences:
+{{
+  "ready": false,
+  "question": "What kind of app do you want to build?",
+  "options": ["A game", "A productivity tool", "A data dashboard", "A creative toy"],
+  "brief": null
+}}
+OR, when ready:
+{{
+  "ready": true,
+  "question": null,
+  "options": [],
+  "brief": "Build a tic-tac-toe game with a 3x3 board and a running score for X and O."
+}}"""
+
+
 def planner_prompt(user_prompt: str) -> str:
     return f"""You are the PLANNER for a React app that will run in a CodeSandbox Sandpack
 "react" sandbox (CRA-style, entry file is /App.js). Turn the request into a build plan.

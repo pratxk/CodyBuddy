@@ -32,3 +32,24 @@ class TaskPlan(BaseModel):
     )
 
     model_config = ConfigDict(extra="ignore")
+
+
+class IntakeStep(BaseModel):
+    """One turn of the self-gating intake loop.
+
+    Either ready (with a consolidated build brief) OR asking ONE more question
+    (with a few selectable options). Never both — but the endpoint tolerates
+    partial output and fills gaps defensively.
+    """
+    ready: bool = Field(description="True if the request is specific enough to build")
+    question: str | None = Field(
+        default=None, description="The single next clarifying question (when not ready)"
+    )
+    options: list[str] = Field(
+        default_factory=list, description="2-4 short, selectable answer options for the question"
+    )
+    brief: str | None = Field(
+        default=None, description="Consolidated 1-3 sentence build brief (when ready)"
+    )
+
+    model_config = ConfigDict(extra="ignore")
