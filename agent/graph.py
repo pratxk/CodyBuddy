@@ -16,8 +16,10 @@ logger = logging.getLogger("codybuddy")
 
 def _planner_node(emitter):
     def node(state: dict) -> dict:
+        # ponytail: generous budget — reasoning-model fallbacks (Cerebras gpt-oss, GLM)
+        # spend tokens thinking, so a tight cap truncates the JSON ("Unterminated string").
         plan = chat_structured(planner_prompt(state["user_prompt"]), Plan,
-                               chain=PLANNER_CHAIN, max_tokens=1500)
+                               chain=PLANNER_CHAIN, max_tokens=4000)
         if emitter:
             emitter.end_current(ok=True); emitter.start_next()
         return {"plan": plan}
@@ -27,8 +29,10 @@ def _planner_node(emitter):
 def _architect_node(emitter):
     def node(state: dict) -> dict:
         plan: Plan = state["plan"]
+        # ponytail: 8000 — the TaskPlan JSON (per-file task descriptions) was truncating at
+        # 2000 ("Unterminated string"); reasoning fallbacks need extra headroom too.
         task_plan = chat_structured(architect_prompt(plan.model_dump_json(indent=2)),
-                                    TaskPlan, chain=PLANNER_CHAIN, max_tokens=2000)
+                                    TaskPlan, chain=PLANNER_CHAIN, max_tokens=8000)
         if emitter:
             emitter.end_current(ok=True); emitter.start_next()
         return {"plan": plan, "task_plan": task_plan, "plan_json": plan.model_dump_json()}
