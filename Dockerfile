@@ -9,6 +9,7 @@ COPY agent/ agent/
 COPY api/ api/
 COPY auth/ auth/
 COPY db/ db/
+COPY integrations/ integrations/
 RUN useradd --no-create-home --shell /bin/false appuser
 USER appuser
 EXPOSE 7860
