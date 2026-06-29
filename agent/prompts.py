@@ -278,8 +278,14 @@ RULES:
   for a data app; responsive; polished).
 - Emit EVERY file (modified or unchanged) so the full file set is complete.
 
-Output ALL files in this EXACT format — no prose before/after, no markdown fences:
+Output your response in this EXACT format — FIRST a single REPLY block, THEN ALL files.
+No prose before/after, no markdown fences:
 
+=== REPLY ===
+A SHORT (1-3 sentence) first-person, conversational message AS "the VibeEngineer", telling the
+user what you just changed and (optionally) offering an obvious next step. Talk like a teammate,
+not a changelog. Example: "Done — switched the palette to a calm dark teal and added a hover lift
+to the cards. Want me to animate the chart next?"
 === FILE: /styles.css ===
 (full file body here)
 === FILE: /App.js ===
@@ -287,4 +293,4 @@ Output ALL files in this EXACT format — no prose before/after, no markdown fen
 
 Files to emit (all of them, in dependency order): {file_list}
 
-Use EXACTLY the delimiter format above for each file. No other text outside the delimiters."""
+Use EXACTLY the delimiter format above (one REPLY block, then each file). No other text outside the delimiters."""

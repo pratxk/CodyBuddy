@@ -4,6 +4,7 @@ import re
 SANDPACK_TEMPLATE = "react"
 
 _FILE_HEADER_RE = re.compile(r"^=== FILE: (.+?) ===$", re.MULTILINE)
+_REPLY_HEADER_RE = re.compile(r"^=== REPLY ===\s*$", re.MULTILINE)
 
 
 def parse_multi_file_response(raw: str, strip_fences_fn) -> dict[str, str]:
@@ -26,6 +27,26 @@ def parse_multi_file_response(raw: str, strip_fences_fn) -> dict[str, str]:
         body = raw[start:end]
         files[filepath] = strip_fences_fn(body)
     return files
+
+
+def parse_reply_and_files(raw: str, strip_fences_fn) -> tuple[str, dict[str, str]]:
+    """Split a VibeEngineer response into (reply, files).
+
+    The response leads with an optional `=== REPLY ===` block (a short conversational
+    message) followed by the usual `=== FILE: /path ===` blocks. The reply is the text
+    between the REPLY header and the first FILE header. Files are parsed exactly as before
+    (parse_multi_file_response ignores the REPLY header — it only matches FILE: headers),
+    so callers that don't need the reply keep working unchanged.
+    """
+    reply = ""
+    reply_match = _REPLY_HEADER_RE.search(raw)
+    if reply_match:
+        file_match = _FILE_HEADER_RE.search(raw, reply_match.end())
+        end = file_match.start() if file_match else len(raw)
+        reply = raw[reply_match.end():end].strip()
+    files = parse_multi_file_response(raw, strip_fences_fn)
+    return reply, files
+
 
 BASE_DEPENDENCIES: dict[str, str] = {
     "react": "^18.2.0",
