@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.auth import router as auth_router
 from api.enhance import router as enhance_router
 from api.generate import router as generate_router, shutdown_executor
+from api.integrations import router as integrations_router
 from api.intake import router as intake_router
 from api.oncall import router as oncall_router
 from api.projects import router as projects_router
@@ -47,6 +48,7 @@ app.include_router(enhance_router, prefix="/api")
 app.include_router(oncall_router, prefix="/api")
 app.include_router(intake_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
+app.include_router(integrations_router, prefix="/api")
 
 
 @app.get("/api/health", tags=["health"])

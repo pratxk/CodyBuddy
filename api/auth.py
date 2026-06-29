@@ -52,11 +52,29 @@ class GoogleAuthRequest(BaseModel):
     id_token: str
 
 
+class GitHubStatus(BaseModel):
+    connected: bool = False
+    login: str | None = None
+
+
+def _github_status(user: User) -> GitHubStatus:
+    """Derive GitHub connection status defensively. NEVER returns the token.
+
+    ponytail: guard against MagicMock/non-str attrs (test fixtures) — only a real,
+    non-empty encrypted string counts as connected.
+    """
+    enc = getattr(user, "github_token_enc", None)
+    login = getattr(user, "github_login", None)
+    connected = isinstance(enc, str) and bool(enc)
+    return GitHubStatus(connected=connected, login=login if (connected and isinstance(login, str)) else None)
+
+
 class UserResponse(BaseModel):
     id: str
     email: str
     name: str | None
     role: str = "user"
+    github: GitHubStatus = GitHubStatus()
 
     model_config = {"from_attributes": True}
 
@@ -84,7 +102,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> AuthRespons
 
     role = _ensure_role(user, db)
     token = create_access_token(str(user.id), user.email)
-    return AuthResponse(token=token, user=UserResponse(id=str(user.id), email=user.email, name=user.name, role=role))
+    return AuthResponse(token=token, user=UserResponse(id=str(user.id), email=user.email, name=user.name, role=role, github=_github_status(user)))
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -97,7 +115,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
 
     role = _ensure_role(user, db)
     token = create_access_token(str(user.id), user.email)
-    return AuthResponse(token=token, user=UserResponse(id=str(user.id), email=user.email, name=user.name, role=role))
+    return AuthResponse(token=token, user=UserResponse(id=str(user.id), email=user.email, name=user.name, role=role, github=_github_status(user)))
 
 
 @router.post("/google", response_model=AuthResponse)
@@ -136,7 +154,7 @@ def google_auth(payload: GoogleAuthRequest, db: Session = Depends(get_db)) -> Au
 
     role = _ensure_role(user, db)
     token = create_access_token(str(user.id), user.email)
-    return AuthResponse(token=token, user=UserResponse(id=str(user.id), email=user.email, name=user.name, role=role))
+    return AuthResponse(token=token, user=UserResponse(id=str(user.id), email=user.email, name=user.name, role=role, github=_github_status(user)))
 
 
 @router.get("/me", response_model=UserResponse)
@@ -144,4 +162,5 @@ def me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return UserResponse(
         id=str(current_user.id), email=current_user.email,
         name=current_user.name, role=_resolve_role(current_user.email),
+        github=_github_status(current_user),
     )

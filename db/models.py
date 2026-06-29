@@ -27,6 +27,11 @@ class User(Base):
     # ponytail: allowlist-driven role; "user" by default, "SUPER_ADMIN" for allowlisted emails.
     # Existing rows on Neon need scripts/migrate_add_role.sql (create_all won't ALTER).
     role: Mapped[str] = mapped_column(String, default="user", server_default="user", nullable=False)
+    # ponytail: GitHub PAT stored ENCRYPTED (Fernet via auth/crypto.py) — never plaintext.
+    # github_login is cached alongside so /me doesn't call GitHub on every request.
+    # Existing Neon rows need scripts/migrate_add_github_token.sql (create_all won't ALTER).
+    github_token_enc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    github_login: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     def __repr__(self) -> str:
