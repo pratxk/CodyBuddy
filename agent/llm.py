@@ -75,6 +75,17 @@ CODER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.3-70b-versatile"),
     ("openrouter", "qwen/qwen3-coder:free"),
 ]
+# ponytail: PREMIUM coder builds run at max_tokens=20000 — drop Groq (12k TPM → 413) and
+# OpenRouter free (429s under load). Lead with the highest-capacity providers that can serve
+# 20k: Cerebras (1M/day, fast) → NVIDIA (reliable) → Cloudflare GLM (strong, slow) → Gemini
+# (1M ctx) → SambaNova. All can return a 20k-token response without truncating the file set.
+CODER_CHAIN_PREMIUM: list[tuple[str, str]] = [
+    ("cerebras", "gpt-oss-120b"),
+    ("nvidia", "meta/llama-3.3-70b-instruct"),
+    ("cloudflare", "@cf/zai-org/glm-5.2"),
+    ("gemini", "gemini-2.5-flash"),
+    ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
+]
 
 _RETRYABLE = (RateLimitError, APIError, APIConnectionError)
 _clients: dict[str, OpenAI] = {}

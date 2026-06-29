@@ -54,6 +54,31 @@ def test_run_build_returns_sandpack_files_no_disk(tmp_path, monkeypatch):
     assert not (pathlib.Path.cwd() / "generated_project").exists()
 
 
+def test_run_build_premium_uses_higher_budget_and_premium_prompt(monkeypatch):
+    plan = Plan(name="SocialDash", description="saas", techStack=["React"],
+                features=["dashboard"], files=[File(path="/App.js", purpose="root")])
+    task_plan = TaskPlan(implementation_steps=[
+        ImplementationTask(filepath="/App.js", task_description="app shell"),
+    ])
+    captured = {}
+
+    def fake_structured(prompt, schema, **kw):
+        return plan if schema is Plan else task_plan
+
+    def fake_chat(prompt, **kw):
+        captured["max_tokens"] = kw.get("max_tokens")
+        captured["premium_prompt"] = "PREMIUM PRODUCTION-GRADE MODE" in prompt
+        return "=== FILE: /App.js ===\nexport default function App(){return <h1>Dash</h1>;}\n"
+
+    monkeypatch.setattr(g, "chat_structured", fake_structured)
+    monkeypatch.setattr(g, "chat", fake_chat)
+
+    result = g.run_build("social media dashboard", premium=True)
+    assert result["files"]["/App.js"]
+    assert captured["max_tokens"] == 20000
+    assert captured["premium_prompt"] is True
+
+
 # ── parse_multi_file_response unit tests ─────────────────────────────────────
 
 def test_parse_multi_file_basic():

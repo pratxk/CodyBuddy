@@ -10,7 +10,7 @@ import api.generate as gen_module
 client = TestClient(app)
 
 
-def _fake_run_build(brief, emitter=None):
+def _fake_run_build(brief, emitter=None, premium=False):
     """Fast fake run_build: no network calls, returns deterministic output."""
     plan = type("Plan", (), {"name": "TestApp"})()
     return {"plan": plan, "files": {"/App.js": "console.log('hello');"}}
@@ -66,3 +66,38 @@ def test_generate_events_streams_result_and_done():
 def test_generate_events_unknown_job_returns_404():
     r = client.get("/api/generate/events/nonexistent-job-id")
     assert r.status_code == 404
+
+
+# ── premium gate (server-side: honored ONLY for SUPER_ADMIN) ─────────────────────
+
+def test_resolve_premium_ignored_for_non_admin():
+    from types import SimpleNamespace
+    from api.generate import _resolve_premium
+    assert _resolve_premium(True, SimpleNamespace(role="user")) is False
+
+
+def test_resolve_premium_honored_for_super_admin():
+    from types import SimpleNamespace
+    from api.generate import _resolve_premium
+    assert _resolve_premium(True, SimpleNamespace(role="SUPER_ADMIN")) is True
+
+
+def test_resolve_premium_false_stays_false_for_admin():
+    from types import SimpleNamespace
+    from api.generate import _resolve_premium
+    assert _resolve_premium(False, SimpleNamespace(role="SUPER_ADMIN")) is False
+
+
+def test_resolve_premium_missing_role_is_false():
+    from types import SimpleNamespace
+    from api.generate import _resolve_premium
+    assert _resolve_premium(True, SimpleNamespace()) is False
+
+
+def test_generate_start_accepts_premium_flag_non_admin():
+    """Non-admin (FAKE_USER role='user') may send premium=True; endpoint still returns a job."""
+    from unittest.mock import patch
+    with patch("api.generate.run_build", _fake_run_build):
+        r = client.post("/api/generate/start", json={"brief": "social dashboard", "premium": True})
+        assert r.status_code == 200
+        assert "job_id" in r.json()

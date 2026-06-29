@@ -39,6 +39,26 @@ DESIGN_GUIDELINES = """DESIGN REQUIREMENTS (non-negotiable — the app must look
   Avoid unstyled browser defaults. Write REAL, complete CSS — never empty or placeholder."""
 
 
+PREMIUM_GUIDELINES = """PREMIUM PRODUCTION-GRADE MODE (this build must look like a real, shippable SaaS product — not a demo):
+- Build a real MULTI-VIEW PRODUCT SHELL: a persistent SIDEBAR (navigates between sections) plus a
+  TOPBAR (app/brand name, search, user avatar/menu). Several DISTINCT sections/pages (e.g. Overview,
+  Analytics, a primary entity list/table, Settings) switched via in-app navigation (React state).
+- Multiple RICH components: KPI/stat cards with value + label + delta/trend, a sortable/filterable
+  DATA TABLE, entity/account CARDS, a CALENDAR or schedule view, plus modals/drawers, tabs, toasts.
+- REAL data-viz via `recharts`: at least 2-3 DIFFERENT chart types (area/line trend, bar breakdown,
+  pie/donut), each in <ResponsiveContainer>, fed by REALISTIC seed data (weeks of points, dozens of
+  rows) that tells a coherent story — keep seed data in its own /data module.
+- Concrete example to match in ambition (adapt to the actual request): a Social Media Management
+  dashboard with a scheduled-posts table, engagement-over-time charts, connected-account cards, and
+  a content calendar.
+- EMPTY, LOADING, and HOVER/active states everywhere; interactions must actually work (filters
+  filter, tabs switch, sort sorts, modals open/close).
+- A cohesive PROFESSIONAL DESIGN SYSTEM: consistent spacing scale, a refined token palette, clear
+  typographic hierarchy, subtle motion — on par with Linear / Vercel / Stripe dashboards.
+- Target 8-14 well-separated files (App shell + sidebar/topbar + multiple section components +
+  chart components + a seed-data module + styles). Do NOT collapse it into one or two big files."""
+
+
 def intake_prompt(prompt: str, history: list[dict]) -> str:
     """Build the INTAKE self-gating prompt.
 
@@ -97,11 +117,13 @@ OR, when ready:
 }}"""
 
 
-def planner_prompt(user_prompt: str) -> str:
+def planner_prompt(user_prompt: str, premium: bool = False) -> str:
+    premium_block = f"\n{PREMIUM_GUIDELINES}\n" if premium else ""
     return f"""You are the PLANNER for a React app that will run in a CodeSandbox Sandpack
 "react" sandbox (CRA-style, entry file is /App.js). Turn the request into a build plan.
 
 User's request: {user_prompt}
+{premium_block}
 
 Rules:
 - Output a CLIENT-SIDE React SPA only (no server, no Node backend, no native deps).
@@ -132,9 +154,10 @@ Respond with ONLY valid JSON — no prose, no markdown, no code fences:
 }}"""
 
 
-def architect_prompt(plan_json: str) -> str:
+def architect_prompt(plan_json: str, premium: bool = False) -> str:
+    premium_block = f"\n{PREMIUM_GUIDELINES}\n" if premium else ""
     return f"""You are the ARCHITECT. Break the plan into ordered, self-contained
-implementation steps — one per file.
+implementation steps — one per file.{premium_block}
 
 For each step specify exactly what to implement (component names, props, state, handlers)
 and how files connect (imports/exports). /App.js imports the components AND imports
@@ -182,13 +205,14 @@ CODER_SYSTEM_PROMPT = (
 )
 
 
-def coder_prompt(task_steps: list[dict], plan_json: str) -> str:
+def coder_prompt(task_steps: list[dict], plan_json: str, premium: bool = False) -> str:
     """Build the single-call prompt that generates ALL app files at once."""
     steps_text = "\n".join(
         f"  {i+1}. {s['filepath']}: {s['task_description']}"
         for i, s in enumerate(task_steps)
     )
     file_list = ", ".join(s["filepath"] for s in task_steps)
+    premium_block = f"\n{PREMIUM_GUIDELINES}\n" if premium else ""
     return f"""Project plan:
 {plan_json}
 
@@ -196,6 +220,7 @@ Implementation steps (for ALL files you must produce):
 {steps_text}
 
 {DESIGN_GUIDELINES}
+{premium_block}
 
 FUNCTIONAL COMPLETENESS RULES (non-negotiable):
 - App.js MUST render the ENTIRE feature UI — not just a shell.

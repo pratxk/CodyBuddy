@@ -32,6 +32,15 @@ def shutdown_executor() -> None:
 class GenerateRequest(BaseModel):
     brief: str
     session_id: str | None = None  # ponytail: kept for backward compat, ignored for ownership
+    premium: bool = False  # honored ONLY for SUPER_ADMIN (server-side gate below)
+
+
+def _resolve_premium(requested: bool, user) -> bool:
+    """Server-side gate: premium production-grade builds are honored ONLY for SUPER_ADMIN.
+
+    ponytail: never trust the client flag — a non-admin asking for premium gets standard.
+    """
+    return bool(requested) and getattr(user, "role", "") == "SUPER_ADMIN"
 
 
 def _persist_project(user_id: str | None, title: str, brief: str, files: dict) -> str | None:
@@ -50,10 +59,10 @@ def _persist_project(user_id: str | None, title: str, brief: str, files: dict) -
         return None
 
 
-def _run_job(job_id, queue, loop, brief, user_id=None):
+def _run_job(job_id, queue, loop, brief, user_id=None, premium=False):
     emitter = AgentEventEmitter(loop, queue, BUILD_TOPOLOGY)
     try:
-        out = run_build(brief, emitter=emitter)
+        out = run_build(brief, emitter=emitter, premium=premium)
         project_id = _persist_project(user_id, out["plan"].name, brief, out["files"])
         payload: dict = {"type": "result", "name": out["plan"].name, "files": out["files"]}
         if project_id:
@@ -77,7 +86,8 @@ async def generate_start(
     queue: asyncio.Queue = asyncio.Queue()
     _job_queues[job_id] = queue
     user_id = str(current_user.id)
-    _executor.submit(_run_job, job_id, queue, loop, req.brief, user_id)
+    premium = _resolve_premium(req.premium, current_user)
+    _executor.submit(_run_job, job_id, queue, loop, req.brief, user_id, premium)
     return {"job_id": job_id}
 
 
