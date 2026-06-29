@@ -270,6 +270,68 @@ def oncall_prompt(files: dict[str, str], error: str) -> str:
     return vibe_prompt(files, instruction)
 
 
+def uxmaster_prompt(files: dict[str, str], instruction: str, image_provided: bool = True) -> str:
+    """Build the single-call UX MASTER prompt.
+
+    A vision review: the model sees a SCREENSHOT of the running app (sent alongside this
+    prompt as an image) plus the current code, critiques the ACTUAL rendered UI, and returns
+    the COMPLETE improved file set. Output adds a `=== VERIFY ===` boolean block (does UX
+    Master want a fresh screenshot to confirm the change landed?) between REPLY and the files.
+    """
+    current_files_text = "\n".join(
+        f"=== FILE: {path} ===\n{content}" for path, content in files.items()
+    )
+    file_list = ", ".join(files.keys())
+    screenshot_line = (
+        "A SCREENSHOT of the running app is attached to this message — review what it ACTUALLY renders."
+        if image_provided
+        else "No screenshot was provided — review the code and infer the rendered UI."
+    )
+    user_focus = instruction.strip() if instruction and instruction.strip() else (
+        "Do a full design pass and raise the visual quality."
+    )
+    return f"""You are UX MASTER, a senior product designer reviewing a SCREENSHOT of the running app plus its code.
+{screenshot_line}
+
+Critique the ACTUAL rendered UI — visual hierarchy, spacing/rhythm, contrast/legibility,
+alignment, polish, responsiveness cues — and IMPROVE the code accordingly (follow DESIGN_GUIDELINES).
+Don't just restyle blindly: tie each change to something you can see in the screenshot.
+
+User's focus for this pass:
+{user_focus}
+
+Current app files:
+{current_files_text}
+
+{DESIGN_GUIDELINES}
+
+RULES:
+- Keep it a working CodeSandbox Sandpack 'react' app (entry /App.js, /App.js imports "./styles.css").
+- Apply real, substantial design improvements — not cosmetic tweaks. Keep ALL behavior intact;
+  no missing imports, no broken references. The app must mount with NO console errors.
+- Emit EVERY file (modified or unchanged) so the full file set is complete.
+
+Output your response in this EXACT format — FIRST a REPLY block, THEN a VERIFY block, THEN ALL files.
+No prose before/after, no markdown fences:
+
+=== REPLY ===
+A first-person, conversational message AS "UX MASTER": what you saw in the screenshot, what you
+changed, and WHY. Talk like a design partner, not a changelog.
+=== VERIFY ===
+true
+(this block contains EXACTLY `true` or `false` — `true` if you want the user to send a NEW
+screenshot so you can verify your change landed; `false` if you're confident. YOU decide.)
+=== FILE: /styles.css ===
+(full file body here)
+=== FILE: /App.js ===
+(full file body here)
+
+Files to emit (all of them, in dependency order): {file_list}
+
+Use EXACTLY the delimiter format above (one REPLY block, one VERIFY block, then each file).
+No other text outside the delimiters."""
+
+
 def vibe_prompt(files: dict[str, str], instruction: str, premium: bool = False) -> str:
     """Build the single-call VibeEngineer prompt.
 

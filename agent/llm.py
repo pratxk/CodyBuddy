@@ -86,6 +86,9 @@ CODER_CHAIN_PREMIUM: list[tuple[str, str]] = [
     ("gemini", "gemini-2.5-flash"),
     ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
 ]
+# ponytail: Gemini 2.5 Flash is free + MULTIMODAL — the only vision-capable model in the pool,
+# so the vision chain is gemini-only (no second fallback that's verified to accept image_url).
+VISION_CHAIN: list[tuple[str, str]] = [("gemini", "gemini-2.5-flash")]
 
 _RETRYABLE = (RateLimitError, APIError, APIConnectionError)
 _clients: dict[str, OpenAI] = {}
@@ -153,6 +156,51 @@ def chat(
             logger.warning("Provider %s/%s failed: %s — falling back", provider, model, exc)
             continue
     raise AllProvidersFailed(f"All providers failed: {last_err}")
+
+
+def chat_vision(
+    prompt: str,
+    image_data_url: str,
+    *,
+    chain: list[tuple[str, str]] | None = None,
+    system: str | None = None,
+    max_tokens: int = 4096,
+    temperature: float = 0.2,
+) -> str:
+    """Multimodal chat — sends a text prompt + an image (base64 data URL) to a vision model.
+
+    Builds OpenAI-compatible multimodal `content` (text part + image_url part) and reuses the
+    same provider-fallback + error handling as chat(). Defaults to VISION_CHAIN (Gemini 2.5
+    Flash — free + multimodal).
+    """
+    chain = usable_chain(chain or VISION_CHAIN)
+    if not chain:
+        raise AllProvidersFailed("No vision provider has an API key configured")
+
+    messages: list = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({
+        "role": "user",
+        "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": image_data_url}},
+        ],
+    })
+
+    last_err: Exception | None = None
+    for provider, model in chain:
+        try:
+            resp = get_client(provider).chat.completions.create(
+                model=model, messages=messages,  # type: ignore[arg-type]
+                max_tokens=max_tokens, temperature=temperature,
+            )
+            return (resp.choices[0].message.content or "").strip()
+        except _RETRYABLE as exc:
+            last_err = exc
+            logger.warning("Vision provider %s/%s failed: %s — falling back", provider, model, exc)
+            continue
+    raise AllProvidersFailed(f"All vision providers failed: {last_err}")
 
 
 _FENCE_OPEN_RE = re.compile(r"^```[a-zA-Z0-9_+-]*\s*\n?")

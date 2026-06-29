@@ -95,3 +95,49 @@ def test_to_vite_project_package_json():
 def test_slugify():
     assert scaffold.slugify("My Cool App!!") == "my-cool-app"
     assert scaffold.slugify("") == "app"
+
+
+# ── parse_uxmaster_response ──────────────────────────────────────────────────
+
+from agent.llm import strip_code_fences
+
+
+def test_parse_uxmaster_extracts_reply_verify_and_files():
+    raw = (
+        "=== REPLY ===\n"
+        "I saw cramped spacing and low contrast — bumped the padding and darkened text.\n"
+        "=== VERIFY ===\n"
+        "true\n"
+        "=== FILE: /App.js ===\n"
+        "export default function App(){return <h1>Hi</h1>;}\n"
+        "=== FILE: /styles.css ===\n"
+        "body { margin: 0; }\n"
+    )
+    reply, needs_verification, files = scaffold.parse_uxmaster_response(raw, strip_code_fences)
+    assert reply.startswith("I saw cramped spacing")
+    assert "VERIFY" not in reply  # verify block trimmed out of the reply
+    assert needs_verification is True
+    assert set(files.keys()) == {"/App.js", "/styles.css"}
+
+
+def test_parse_uxmaster_verify_false():
+    raw = (
+        "=== REPLY ===\nLooks solid now.\n"
+        "=== VERIFY ===\nfalse\n"
+        "=== FILE: /App.js ===\nconst x=1;\n"
+    )
+    reply, needs_verification, files = scaffold.parse_uxmaster_response(raw, strip_code_fences)
+    assert needs_verification is False
+    assert reply == "Looks solid now."
+    assert "/App.js" in files
+
+
+def test_parse_uxmaster_verify_defaults_false_when_absent():
+    raw = (
+        "=== REPLY ===\nTweaked it.\n"
+        "=== FILE: /App.js ===\nconst x=1;\n"
+    )
+    reply, needs_verification, files = scaffold.parse_uxmaster_response(raw, strip_code_fences)
+    assert needs_verification is False
+    assert reply == "Tweaked it."
+    assert "/App.js" in files

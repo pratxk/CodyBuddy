@@ -5,6 +5,7 @@ SANDPACK_TEMPLATE = "react"
 
 _FILE_HEADER_RE = re.compile(r"^=== FILE: (.+?) ===$", re.MULTILINE)
 _REPLY_HEADER_RE = re.compile(r"^=== REPLY ===\s*$", re.MULTILINE)
+_VERIFY_HEADER_RE = re.compile(r"^=== VERIFY ===\s*$", re.MULTILINE)
 
 
 def parse_multi_file_response(raw: str, strip_fences_fn) -> dict[str, str]:
@@ -46,6 +47,31 @@ def parse_reply_and_files(raw: str, strip_fences_fn) -> tuple[str, dict[str, str
         reply = raw[reply_match.end():end].strip()
     files = parse_multi_file_response(raw, strip_fences_fn)
     return reply, files
+
+
+def parse_uxmaster_response(
+    raw: str, strip_fences_fn
+) -> tuple[str, bool, dict[str, str]]:
+    """Split a UX MASTER response into (reply, needs_verification, files).
+
+    Same shape as parse_reply_and_files but with an extra `=== VERIFY ===` block (containing
+    `true`/`false`) between the REPLY block and the first FILE block. Reuses
+    parse_reply_and_files for reply + files, then narrows the reply to end at the VERIFY header
+    and reads the boolean. needs_verification defaults False when the VERIFY block is absent.
+    """
+    reply, files = parse_reply_and_files(raw, strip_fences_fn)
+    needs_verification = False
+    verify_match = _VERIFY_HEADER_RE.search(raw)
+    if verify_match:
+        reply_match = _REPLY_HEADER_RE.search(raw)
+        if reply_match:
+            # parse_reply_and_files swept the VERIFY block into reply — trim it back out.
+            reply = raw[reply_match.end():verify_match.start()].strip()
+        file_match = _FILE_HEADER_RE.search(raw, verify_match.end())
+        end = file_match.start() if file_match else len(raw)
+        verify_text = raw[verify_match.end():end].strip().lower()
+        needs_verification = verify_text.startswith("true")
+    return reply, needs_verification, files
 
 
 BASE_DEPENDENCIES: dict[str, str] = {
