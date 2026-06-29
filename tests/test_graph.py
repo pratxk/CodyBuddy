@@ -39,12 +39,12 @@ def test_run_build_returns_sandpack_files_no_disk(tmp_path, monkeypatch):
     def fake_structured(prompt, schema, **kw):
         return plan if schema is Plan else task_plan
 
-    # single-call coder now returns delimited multi-file format
-    def fake_chat(prompt, **kw):
+    # single-call coder now streams; returns delimited multi-file format
+    def fake_chat_stream(prompt, **kw):
         return "=== FILE: /App.js ===\nexport default function App(){return <h1>Tic</h1>;}\n"
 
     monkeypatch.setattr(g, "chat_structured", fake_structured)
-    monkeypatch.setattr(g, "chat", fake_chat)
+    monkeypatch.setattr(g, "chat_stream", fake_chat_stream)
 
     result = g.run_build("tic tac toe")
     assert is_sandpack_shaped(result["files"])
@@ -65,18 +65,53 @@ def test_run_build_premium_uses_higher_budget_and_premium_prompt(monkeypatch):
     def fake_structured(prompt, schema, **kw):
         return plan if schema is Plan else task_plan
 
-    def fake_chat(prompt, **kw):
+    def fake_chat_stream(prompt, **kw):
         captured["max_tokens"] = kw.get("max_tokens")
         captured["premium_prompt"] = "PREMIUM PRODUCTION-GRADE MODE" in prompt
         return "=== FILE: /App.js ===\nexport default function App(){return <h1>Dash</h1>;}\n"
 
     monkeypatch.setattr(g, "chat_structured", fake_structured)
-    monkeypatch.setattr(g, "chat", fake_chat)
+    monkeypatch.setattr(g, "chat_stream", fake_chat_stream)
 
     result = g.run_build("social media dashboard", premium=True)
     assert result["files"]["/App.js"]
     assert captured["max_tokens"] == 20000
     assert captured["premium_prompt"] is True
+
+
+def test_coder_node_emits_coder_chunk(monkeypatch):
+    """The coder node passes an on_delta that emits coder_chunk through the emitter."""
+    plan = Plan(name="App", description="x", techStack=["React"], features=["f"],
+                files=[File(path="/App.js", purpose="root")])
+    task_plan = TaskPlan(implementation_steps=[
+        ImplementationTask(filepath="/App.js", task_description="render"),
+    ])
+
+    def fake_structured(prompt, schema, **kw):
+        return plan if schema is Plan else task_plan
+
+    # chat_stream that drives on_delta with two chunks (simulating a live stream).
+    def fake_chat_stream(prompt, *, on_delta=None, **kw):
+        for piece in ("=== FILE: /App.js ===\n", "export default function App(){return <h1>Hi</h1>;}\n"):
+            if on_delta:
+                on_delta(piece)
+        return "=== FILE: /App.js ===\nexport default function App(){return <h1>Hi</h1>;}\n"
+
+    monkeypatch.setattr(g, "chat_structured", fake_structured)
+    monkeypatch.setattr(g, "chat_stream", fake_chat_stream)
+
+    class FakeEmitter:
+        def __init__(self): self.chunks = []
+        def graph_init(self): pass
+        def start_next(self): pass
+        def end_current(self, **kw): pass
+        def chunk(self, text): self.chunks.append(text)
+
+    em = FakeEmitter()
+    result = g.run_build("an app", emitter=em)
+    assert is_sandpack_shaped(result["files"])
+    assert len(em.chunks) == 2
+    assert "FILE" in "".join(em.chunks)
 
 
 # ── parse_multi_file_response unit tests ─────────────────────────────────────

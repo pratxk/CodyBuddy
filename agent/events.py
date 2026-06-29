@@ -63,6 +63,11 @@ class AgentEventEmitter:
         """Emit the full topology so the FE can render the graph skeleton immediately."""
         self._push(type="graph_init", topology=self._topology)
 
+    def chunk(self, text: str) -> None:
+        """Push a live coder output delta so the FE can show files being written in real time."""
+        if text:
+            self._push(type="coder_chunk", text=text)
+
     def start_next(self) -> None:
         """Advance to the next agent and emit agent_start. No-op past the last agent."""
         self._current_idx += 1

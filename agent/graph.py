@@ -3,8 +3,8 @@ import logging
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 
-from agent.llm import (CODER_CHAIN, CODER_CHAIN_PREMIUM, PLANNER_CHAIN, chat,
-                       chat_structured, strip_code_fences)
+from agent.llm import (CODER_CHAIN, CODER_CHAIN_PREMIUM, PLANNER_CHAIN,
+                       chat_stream, chat_structured, strip_code_fences)
 from agent.prompts import (CODER_SYSTEM_PROMPT, architect_prompt,
                            coder_prompt, planner_prompt)
 from agent.scaffold import normalize_files, parse_multi_file_response
@@ -53,8 +53,13 @@ def _coder_node(emitter, premium=False):
         # Premium: 20000 tokens + CODER_CHAIN_PREMIUM (no Groq/OpenRouter) for production-grade apps.
         chain = CODER_CHAIN_PREMIUM if premium else CODER_CHAIN
         max_tokens = 20000 if premium else 14000
-        raw = chat(coder_prompt(task_dicts, plan_json, premium=premium),
-                   chain=chain, system=CODER_SYSTEM_PROMPT, max_tokens=max_tokens)
+        # ponytail: stream the first provider so the FE can show files being written live
+        # (coder_chunk events); chat_stream falls back to non-streaming chat() on any hiccup,
+        # and we parse the FULL accumulated text exactly as before (final result is authoritative).
+        on_delta = emitter.chunk if emitter else None
+        raw = chat_stream(coder_prompt(task_dicts, plan_json, premium=premium),
+                          chain=chain, system=CODER_SYSTEM_PROMPT,
+                          max_tokens=max_tokens, on_delta=on_delta)
         files = parse_multi_file_response(raw, strip_code_fences)
         for path in files:
             logger.info("Coder: wrote %s (%d chars)", path, len(files[path]))

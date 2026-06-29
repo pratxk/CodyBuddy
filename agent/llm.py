@@ -15,7 +15,7 @@ import logging
 import os
 import re
 import time
-from typing import Type, TypeVar
+from typing import Callable, Type, TypeVar
 
 from dotenv import load_dotenv
 from openai import APIConnectionError, APIError, OpenAI, RateLimitError
@@ -89,6 +89,11 @@ CODER_CHAIN_PREMIUM: list[tuple[str, str]] = [
 # ponytail: Gemini 2.5 Flash is free + MULTIMODAL — the only vision-capable model in the pool,
 # so the vision chain is gemini-only (no second fallback that's verified to accept image_url).
 VISION_CHAIN: list[tuple[str, str]] = [("gemini", "gemini-2.5-flash")]
+
+# ponytail: providers whose OpenAI-compatible SSE streaming we trust to behave (clean deltas).
+# Cloudflare GLM is excluded — slow 60s+ cold starts make streaming fragile, so we never lead
+# the live stream with it (it falls through to non-streaming chat() instead).
+_STREAM_TRUSTED: set[str] = {"cerebras", "gemini", "groq", "nvidia", "sambanova", "openrouter"}
 
 _RETRYABLE = (RateLimitError, APIError, APIConnectionError)
 _clients: dict[str, OpenAI] = {}
@@ -201,6 +206,61 @@ def chat_vision(
             logger.warning("Vision provider %s/%s failed: %s — falling back", provider, model, exc)
             continue
     raise AllProvidersFailed(f"All vision providers failed: {last_err}")
+
+
+def chat_stream(
+    prompt: str,
+    *,
+    chain: list[tuple[str, str]] | None = None,
+    system: str | None = None,
+    max_tokens: int = 2048,
+    temperature: float = 0.2,
+    on_delta: Callable[[str], None] | None = None,
+) -> str:
+    """Stream the FIRST usable provider, invoking on_delta per text chunk, and return the
+    full accumulated text.
+
+    ponytail: only the first provider is streamed (live coder output for the FE). If it isn't
+    a trusted streamer, OR streaming raises/returns nothing, we fall back to the existing
+    non-streaming chat() over the rest of the chain — the result is always authoritative.
+    """
+    chain = usable_chain(chain or CODER_CHAIN)
+    if not chain:
+        raise AllProvidersFailed("No provider has an API key configured")
+
+    messages: list = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    first_provider, first_model = chain[0]
+    fallback_chain = chain
+    if first_provider in _STREAM_TRUSTED:
+        try:
+            stream = get_client(first_provider).chat.completions.create(
+                model=first_model, messages=messages,  # type: ignore[arg-type]
+                max_tokens=max_tokens, temperature=temperature, stream=True,
+            )
+            parts: list[str] = []
+            for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                delta = (getattr(choices[0].delta, "content", None) or "") if choices else ""
+                if delta:
+                    parts.append(delta)
+                    if on_delta:
+                        on_delta(delta)
+            full = "".join(parts).strip()
+            if full:
+                return full
+            logger.warning("Streaming %s/%s yielded empty output — falling back", first_provider, first_model)
+        except Exception as exc:  # noqa: BLE001  ponytail: any SDK/stream hiccup → non-stream fallback
+            logger.warning("Streaming %s/%s failed: %s — falling back to non-streaming", first_provider, first_model, exc)
+        fallback_chain = chain[1:]  # first provider already attempted (and failed)
+
+    if not fallback_chain:
+        raise AllProvidersFailed("Streaming provider failed and no fallback provider available")
+    return chat(prompt, chain=fallback_chain, system=system,
+                max_tokens=max_tokens, temperature=temperature)
 
 
 _FENCE_OPEN_RE = re.compile(r"^```[a-zA-Z0-9_+-]*\s*\n?")
