@@ -107,6 +107,42 @@ def test_signup_returns_token_and_user():
     assert payload["email"] == "new@example.com"
 
 
+def test_signup_super_admin_email_gets_super_admin_role():
+    db, fake_id = _make_db(existing_user=None)
+    db.query.return_value.filter.return_value.first.return_value = None
+    with _db_override(db):
+        r = client.post("/api/auth/signup", json={
+            "email": "proff.pratiksingh@gmail.com",
+            "password": "password123",
+        })
+    assert r.status_code == 201, r.text
+    assert r.json()["user"]["role"] == "SUPER_ADMIN"
+
+
+def test_signup_regular_email_gets_user_role():
+    db, fake_id = _make_db(existing_user=None)
+    db.query.return_value.filter.return_value.first.return_value = None
+    with _db_override(db):
+        r = client.post("/api/auth/signup", json={
+            "email": "regular@example.com",
+            "password": "password123",
+        })
+    assert r.status_code == 201, r.text
+    assert r.json()["user"]["role"] == "user"
+
+
+def test_signup_super_admin_email_is_case_insensitive():
+    db, fake_id = _make_db(existing_user=None)
+    db.query.return_value.filter.return_value.first.return_value = None
+    with _db_override(db):
+        r = client.post("/api/auth/signup", json={
+            "email": "Proff.PratikSingh@Gmail.com",
+            "password": "password123",
+        })
+    assert r.status_code == 201, r.text
+    assert r.json()["user"]["role"] == "SUPER_ADMIN"
+
+
 def test_signup_hashes_password():
     db, fake_id = _make_db(existing_user=None)
     captured = {}
@@ -262,6 +298,24 @@ def test_me_with_valid_token_returns_user():
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["email"] == "me@example.com"
+    assert body["role"] == "user"
+
+
+@pytest.mark.real_auth
+def test_me_returns_super_admin_role_for_allowlisted_email():
+    fake_uid = uuid.uuid4()
+    user = MagicMock()
+    user.id = fake_uid
+    user.email = "proff.pratiksingh@gmail.com"
+    user.name = "Admin"
+    db, _ = _make_db(existing_user=user)
+    db.query.return_value.filter.return_value.first.return_value = user
+
+    token = create_access_token(str(fake_uid), "proff.pratiksingh@gmail.com")
+    with _db_override(db):
+        r = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 200, r.text
+    assert r.json()["role"] == "SUPER_ADMIN"
 
 
 # ── protected endpoint requires auth ──────────────────────────────────────────

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 FAKE_USER_ID = uuid.UUID("aaaabbbb-cccc-dddd-eeee-ffffaaaabbbb")
-FAKE_USER = SimpleNamespace(id=FAKE_USER_ID, email="test@example.com", name="Test User")
+FAKE_USER = SimpleNamespace(id=FAKE_USER_ID, email="test@example.com", name="Test User", role="user")
 
 
 @pytest.fixture(autouse=True)

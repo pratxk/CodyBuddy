@@ -24,6 +24,9 @@ class User(Base):
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     hashed_password: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     google_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    # ponytail: allowlist-driven role; "user" by default, "SUPER_ADMIN" for allowlisted emails.
+    # Existing rows on Neon need scripts/migrate_add_role.sql (create_all won't ALTER).
+    role: Mapped[str] = mapped_column(String, default="user", server_default="user", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     def __repr__(self) -> str:
