@@ -11,7 +11,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from agent.llm import CODER_CHAIN, chat, strip_code_fences
+from agent.llm import CODER_CHAIN, CODER_CHAIN_PREMIUM, chat, strip_code_fences
 from agent.prompts import CODER_SYSTEM_PROMPT, vibe_prompt
 from agent.scaffold import normalize_files, parse_reply_and_files
 from auth.dependencies import get_current_user
@@ -27,6 +27,7 @@ class EnhanceRequest(BaseModel):
     files: dict[str, str]
     instruction: str
     session_id: str | None = None  # ponytail: kept for backward compat, ignored for ownership
+    premium: bool = False  # honored ONLY for SUPER_ADMIN (server-side gate below)
 
 
 class EnhanceResponse(BaseModel):
@@ -45,11 +46,15 @@ def enhance(
     if not req.files:
         raise HTTPException(status_code=400, detail="files must not be empty")
 
+    # ponytail: never trust the client flag — premium is honored only for SUPER_ADMIN
+    # (mirrors api.generate._resolve_premium); a non-admin asking for premium gets standard.
+    premium = bool(req.premium) and getattr(current_user, "role", "") == "SUPER_ADMIN"
+    chain = CODER_CHAIN_PREMIUM if premium else CODER_CHAIN
     raw = chat(
-        vibe_prompt(req.files, req.instruction),
-        chain=CODER_CHAIN,
+        vibe_prompt(req.files, req.instruction, premium=premium),
+        chain=chain,
         system=CODER_SYSTEM_PROMPT,
-        max_tokens=8192,
+        max_tokens=20000 if premium else 8192,
     )
     # ponytail: ONE call emits both the conversational reply and the files.
     reply, parsed = parse_reply_and_files(raw, strip_code_fences)

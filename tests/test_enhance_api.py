@@ -89,3 +89,53 @@ def test_enhance_validation_blank_instruction():
 def test_enhance_validation_empty_files():
     r = client.post("/api/enhance", json={"files": {}, "instruction": "do something"})
     assert r.status_code == 400
+
+
+# ── premium gate (mirrors /api/generate: honored ONLY for SUPER_ADMIN) ───────────
+
+import uuid as _uuid
+from types import SimpleNamespace
+
+from agent.llm import CODER_CHAIN, CODER_CHAIN_PREMIUM
+from auth.dependencies import get_current_user
+
+
+def _override_user(role: str):
+    user = SimpleNamespace(id=_uuid.uuid4(), email="u@x.com", name="U", role=role)
+    app.dependency_overrides[get_current_user] = lambda: user
+
+
+def test_enhance_premium_ignored_for_non_admin():
+    _override_user("user")
+    session = _mock_db_session()
+    chat_mock = MagicMock(return_value=_LLM_WITH_REPLY)
+    with (
+        patch("api.enhance.chat", chat_mock),
+        patch("api.enhance.SessionLocal", return_value=session),
+    ):
+        r = client.post(
+            "/api/enhance",
+            json={"files": _SAMPLE_FILES, "instruction": "enhance it", "premium": True},
+        )
+    assert r.status_code == 200, r.text
+    kwargs = chat_mock.call_args.kwargs
+    assert kwargs["max_tokens"] == 8192
+    assert kwargs["chain"] is CODER_CHAIN
+
+
+def test_enhance_premium_honored_for_super_admin():
+    _override_user("SUPER_ADMIN")
+    session = _mock_db_session()
+    chat_mock = MagicMock(return_value=_LLM_WITH_REPLY)
+    with (
+        patch("api.enhance.chat", chat_mock),
+        patch("api.enhance.SessionLocal", return_value=session),
+    ):
+        r = client.post(
+            "/api/enhance",
+            json={"files": _SAMPLE_FILES, "instruction": "enhance it", "premium": True},
+        )
+    assert r.status_code == 200, r.text
+    kwargs = chat_mock.call_args.kwargs
+    assert kwargs["max_tokens"] == 20000
+    assert kwargs["chain"] is CODER_CHAIN_PREMIUM

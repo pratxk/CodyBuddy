@@ -270,16 +270,20 @@ def oncall_prompt(files: dict[str, str], error: str) -> str:
     return vibe_prompt(files, instruction)
 
 
-def vibe_prompt(files: dict[str, str], instruction: str) -> str:
+def vibe_prompt(files: dict[str, str], instruction: str, premium: bool = False) -> str:
     """Build the single-call VibeEngineer prompt.
 
     Embeds current files (=== FILE: === blocks) + instruction and asks for
     the COMPLETE updated file set in the same delimited format.
+
+    ponytail: premium=True appends PREMIUM_GUIDELINES so SUPER_ADMIN edits are held to the
+    same production-grade bar as premium generation. oncall_prompt keeps the default (False).
     """
     current_files_text = "\n".join(
         f"=== FILE: {path} ===\n{content}" for path, content in files.items()
     )
     file_list = ", ".join(files.keys())
+    premium_block = f"\n{PREMIUM_GUIDELINES}\n" if premium else ""
     return f"""You are the VIBE ENGINEER for a React app running in a CodeSandbox Sandpack 'react' sandbox.
 
 The user wants to modify the existing app with the following instruction:
@@ -289,6 +293,7 @@ Current app files:
 {current_files_text}
 
 {DESIGN_GUIDELINES}
+{premium_block}
 
 RULES:
 - Apply the instruction FULLY and AMBITIOUSLY. If the user asks to "add features" or "enhance"
