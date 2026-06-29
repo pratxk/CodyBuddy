@@ -51,6 +51,10 @@ class Project(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     brief: Mapped[str] = mapped_column(Text, nullable=False)
     files: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # ponytail: session-history columns; existing Neon rows need
+    # scripts/migrate_add_session_history.sql (create_all won't ALTER).
+    chat: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    oncall_log: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )

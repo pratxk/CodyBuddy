@@ -152,6 +152,8 @@ def _make_fake_project_row(user_id=_FAKE_USER_ID):
         title="Fake Project",
         brief="a brief",
         files={"/App.js": "x"},
+        chat=[],
+        oncall_log=[],
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
     )

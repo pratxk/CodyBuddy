@@ -4,9 +4,10 @@ Projects API — list and fetch saved projects by authenticated user.
 import logging
 import uuid
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 
 from agent.scaffold import slugify, to_vite_project
@@ -31,6 +32,8 @@ class ProjectDetail(ProjectSummary):
     session_id: str
     brief: str
     files: dict
+    chat: list
+    oncall_log: list
 
 
 @router.get("", response_model=list[ProjectSummary])
@@ -70,6 +73,8 @@ def get_project(project_id: str, current_user: User = Depends(get_current_user))
         session_id=row.session_id or "",
         brief=row.brief,
         files=row.files,
+        chat=row.chat or [],
+        oncall_log=row.oncall_log or [],
     )
 
 
@@ -113,3 +118,36 @@ def publish_project(
         repo_url=repo_url,
         vercel_import_url=f"https://vercel.com/new/clone?repository-url={repo_url}",
     )
+
+
+class HistoryBody(BaseModel):
+    chat: list[Any]
+    oncall_log: list[Any]
+
+    @field_validator("chat", "oncall_log", mode="before")
+    @classmethod
+    def must_be_list(cls, v: Any) -> list:
+        if not isinstance(v, list):
+            raise ValueError("must be a list")
+        return v
+
+
+@router.put("/{project_id}/history")
+def update_history(
+    project_id: str,
+    body: HistoryBody,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Persist chat + oncall_log arrays for a project (owner-gated)."""
+    try:
+        pid = uuid.UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Project not found")
+    with SessionLocal() as db:
+        row = db.get(Project, pid)
+        if not row or row.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Project not found")
+        row.chat = body.chat
+        row.oncall_log = body.oncall_log
+        db.commit()
+    return {"ok": True}
