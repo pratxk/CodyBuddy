@@ -62,12 +62,13 @@ def intake(
 
     # HARD CAP: stop asking after enough questions — force a build.
     # ponytail: simple guard against an indecisive model looping forever.
+    # Carry the intake's framework decision through the fallback paths (default "react").
     if len(req.history) >= _MAX_HISTORY and not step.ready:
         brief = step.brief or _synthesize_brief(req.prompt, req.history)
-        return IntakeStep(ready=True, brief=brief)
+        return IntakeStep(ready=True, brief=brief, framework=step.framework)
 
     # If the model says ready but gave no brief, fall back to the prompt.
     if step.ready and not (step.brief and step.brief.strip()):
-        return IntakeStep(ready=True, brief=req.prompt.strip())
+        return IntakeStep(ready=True, brief=req.prompt.strip(), framework=step.framework)
 
     return step

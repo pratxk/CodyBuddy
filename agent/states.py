@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from agent.scaffold import coerce_framework
 
 
 class File(BaseModel):
@@ -51,5 +53,15 @@ class IntakeStep(BaseModel):
     brief: str | None = Field(
         default=None, description="Consolidated 1-3 sentence build brief (when ready)"
     )
+    framework: str = Field(
+        default="react",
+        description='Framework to build as: "react" (default) | "static" | "nextjs"',
+    )
+
+    @field_validator("framework", mode="before")
+    @classmethod
+    def _coerce_framework(cls, v):
+        # ponytail: validate at the boundary — unknown/invalid framework → "react".
+        return coerce_framework(v)
 
     model_config = ConfigDict(extra="ignore")
