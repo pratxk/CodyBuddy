@@ -34,6 +34,7 @@ class ProjectDetail(ProjectSummary):
     files: dict
     chat: list
     oncall_log: list
+    framework: str = "react"  # default for old rows that predate the column
 
 
 @router.get("", response_model=list[ProjectSummary])
@@ -75,6 +76,7 @@ def get_project(project_id: str, current_user: User = Depends(get_current_user))
         files=row.files,
         chat=row.chat or [],
         oncall_log=row.oncall_log or [],
+        framework=getattr(row, "framework", None) or "react",
     )
 
 
