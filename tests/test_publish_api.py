@@ -28,8 +28,14 @@ def _mock_session_with_project(row):
     return session
 
 
-def _project_row(user_id, title="My Dashboard"):
-    return SimpleNamespace(id=uuid.uuid4(), user_id=user_id, title=title, files=_SANDPACK_FILES)
+def _project_row(user_id, title="My Dashboard", framework="react", files=None):
+    return SimpleNamespace(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title=title,
+        framework=framework,
+        files=files if files is not None else _SANDPACK_FILES,
+    )
 
 
 def _override_user(github_connected: bool):
@@ -76,6 +82,95 @@ def test_publish_foreign_project_returns_404():
     with patch("api.projects.SessionLocal", return_value=_mock_session_with_project(row)):
         r = client.post(f"/api/projects/{row.id}/publish")
     assert r.status_code == 404
+
+
+def test_publish_uses_vite_transform_for_react_framework():
+    """react project → publish_files receives a Vite-shaped repo (index.html + vite.config.js)."""
+    import json as _json
+    user = _override_user(github_connected=True)
+    row = _project_row(user.id, framework="react")
+    repo_url = "https://github.com/octocat/appsmith-my-dashboard"
+    with (
+        patch("api.projects.SessionLocal", return_value=_mock_session_with_project(row)),
+        patch("api.projects.publish_files", return_value=repo_url) as pub,
+    ):
+        r = client.post(f"/api/projects/{row.id}/publish")
+    assert r.status_code == 200
+    pushed_files: dict = pub.call_args.args[2]
+    assert "index.html" in pushed_files
+    assert "vite.config.js" in pushed_files
+    assert "src/main.jsx" in pushed_files
+
+
+def test_publish_static_sends_raw_files_at_root():
+    """static project → publish_files receives index.html at root, no Vite toolchain."""
+    user = _override_user(github_connected=True)
+    static_files = {
+        "/index.html": "<!doctype html><html><body><h1>hi</h1></body></html>",
+        "/styles.css": "body{margin:0}",
+    }
+    row = _project_row(user.id, framework="static", files=static_files)
+    repo_url = "https://github.com/octocat/appsmith-my-dashboard"
+    with (
+        patch("api.projects.SessionLocal", return_value=_mock_session_with_project(row)),
+        patch("api.projects.publish_files", return_value=repo_url) as pub,
+    ):
+        r = client.post(f"/api/projects/{row.id}/publish")
+    assert r.status_code == 200
+    pushed_files: dict = pub.call_args.args[2]
+    assert "index.html" in pushed_files        # root-level (no leading slash)
+    assert "/index.html" not in pushed_files   # never with leading slash
+    assert "vite.config.js" not in pushed_files
+    assert "package.json" not in pushed_files
+    assert ".gitignore" in pushed_files
+    assert "README.md" in pushed_files
+
+
+def test_publish_nextjs_sends_next_files_with_correct_scripts():
+    """nextjs project → package.json has next dev/build/start scripts, app/ preserved."""
+    import json as _json
+    user = _override_user(github_connected=True)
+    next_files = {
+        "/app/page.tsx": "export default function Page(){ return <h1>Hi</h1>; }",
+        "/app/layout.tsx": "export default function Root({children}){ return <html><body>{children}</body></html>; }",
+        "/package.json": _json.dumps({"name": "x", "dependencies": {"next": "^14.2.0", "react": "^18.2.0", "react-dom": "^18.2.0"}}),
+    }
+    row = _project_row(user.id, framework="nextjs", files=next_files)
+    repo_url = "https://github.com/octocat/appsmith-my-dashboard"
+    with (
+        patch("api.projects.SessionLocal", return_value=_mock_session_with_project(row)),
+        patch("api.projects.publish_files", return_value=repo_url) as pub,
+    ):
+        r = client.post(f"/api/projects/{row.id}/publish")
+    assert r.status_code == 200
+    pushed_files: dict = pub.call_args.args[2]
+    pkg = _json.loads(pushed_files["package.json"])
+    assert pkg["scripts"]["dev"] == "next dev"
+    assert pkg["scripts"]["build"] == "next build"
+    assert pkg["scripts"]["start"] == "next start"
+    assert "next" in pkg["dependencies"]
+    assert "app/page.tsx" in pushed_files      # app/ files preserved
+    assert "vite.config.js" not in pushed_files
+    assert ".gitignore" in pushed_files
+    assert ".next" in pushed_files[".gitignore"]
+
+
+def test_publish_old_row_without_framework_attr_defaults_react():
+    """Rows that predate the framework column (no attr) fall back to react/Vite."""
+    user = _override_user(github_connected=True)
+    # SimpleNamespace row without framework attribute at all
+    row = SimpleNamespace(
+        id=uuid.uuid4(), user_id=user.id, title="Old Project", files=_SANDPACK_FILES
+    )
+    repo_url = "https://github.com/octocat/appsmith-old-project"
+    with (
+        patch("api.projects.SessionLocal", return_value=_mock_session_with_project(row)),
+        patch("api.projects.publish_files", return_value=repo_url) as pub,
+    ):
+        r = client.post(f"/api/projects/{row.id}/publish")
+    assert r.status_code == 200
+    pushed_files: dict = pub.call_args.args[2]
+    assert "vite.config.js" in pushed_files   # defaulted to react/Vite
 
 
 def test_publish_github_error_returns_502():

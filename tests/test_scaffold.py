@@ -152,6 +152,119 @@ def test_normalize_react_unchanged_default():
     assert "react" in json.loads(out["/package.json"])["dependencies"]
 
 
+# ── build_publish_repo: framework-aware deployable repo builder ───────────────
+
+_STATIC_FILES = {
+    "/index.html": "<!doctype html><html><body><h1>hi</h1></body></html>",
+    "/styles.css": "body{margin:0}",
+    "/script.js": "console.log('hi')",
+}
+
+_NEXT_FILES = {
+    "/app/layout.tsx": (
+        'import "./globals.css";\n'
+        'export default function RootLayout({children}){\n'
+        '  return <html><body>{children}</body></html>;\n'
+        "}\n"
+    ),
+    "/app/page.tsx": "export default function Page(){ return <h1>Hi</h1>; }\n",
+    "/app/globals.css": "body{margin:0}",
+    "/package.json": json.dumps({
+        "name": "my-app",
+        "dependencies": {"next": "^14.2.0", "react": "^18.2.0", "react-dom": "^18.2.0"},
+    }),
+}
+
+
+def test_build_publish_repo_react_produces_vite_shape():
+    out = scaffold.build_publish_repo(_SANDPACK, "react", "Cool App")
+    # react path → to_vite_project output
+    assert "index.html" in out and 'id="root"' in out["index.html"]
+    assert "src/main.jsx" in out
+    assert "vite.config.js" in out
+    pkg = json.loads(out["package.json"])
+    assert pkg["scripts"]["build"] == "vite build"
+
+
+def test_build_publish_repo_static_index_at_root():
+    out = scaffold.build_publish_repo(_STATIC_FILES, "static", "My Static App")
+    # index.html must be at repo root (no leading slash)
+    assert "index.html" in out
+    assert out["index.html"] == _STATIC_FILES["/index.html"]
+    # no Vite tooling
+    assert "vite.config.js" not in out
+    assert "package.json" not in out
+    # helpers
+    assert ".gitignore" in out
+    assert "README.md" in out
+
+
+def test_build_publish_repo_static_strips_leading_slash():
+    files = {"/index.html": "<h1>x</h1>", "/styles.css": "body{}"}
+    out = scaffold.build_publish_repo(files, "static", "T")
+    assert "index.html" in out
+    assert "/index.html" not in out
+    assert "styles.css" in out
+    assert "/styles.css" not in out
+
+
+def test_build_publish_repo_static_injects_default_index_when_missing():
+    out = scaffold.build_publish_repo({"/styles.css": "body{}"}, "static", "T")
+    assert "index.html" in out  # root-level fallback injected
+
+
+def test_build_publish_repo_nextjs_package_json_scripts():
+    out = scaffold.build_publish_repo(_NEXT_FILES, "nextjs", "Next App")
+    pkg = json.loads(out["package.json"])
+    assert pkg["scripts"]["dev"] == "next dev"
+    assert pkg["scripts"]["build"] == "next build"
+    assert pkg["scripts"]["start"] == "next start"
+
+
+def test_build_publish_repo_nextjs_next_dep_present():
+    out = scaffold.build_publish_repo(_NEXT_FILES, "nextjs", "Next App")
+    pkg = json.loads(out["package.json"])
+    assert "next" in pkg["dependencies"]
+    assert "react" in pkg["dependencies"]
+    assert "react-dom" in pkg["dependencies"]
+
+
+def test_build_publish_repo_nextjs_no_vite_transform():
+    out = scaffold.build_publish_repo(_NEXT_FILES, "nextjs", "Next App")
+    # app/ files preserved as-is, not relocated under src/
+    assert "app/page.tsx" in out
+    assert "app/layout.tsx" in out
+    # no Vite artifacts
+    assert "vite.config.js" not in out
+    assert "src/main.jsx" not in out
+
+
+def test_build_publish_repo_nextjs_adds_next_config_when_missing():
+    files = {"/app/page.tsx": "export default function Page(){return null;}"}
+    out = scaffold.build_publish_repo(files, "nextjs", "T")
+    assert "next.config.js" in out
+
+
+def test_build_publish_repo_nextjs_preserves_existing_next_config():
+    custom = "/** custom */\nmodule.exports = { reactStrictMode: true };\n"
+    files = dict(_NEXT_FILES)
+    files["/next.config.js"] = custom
+    out = scaffold.build_publish_repo(files, "nextjs", "T")
+    assert out["next.config.js"] == custom
+
+
+def test_build_publish_repo_nextjs_gitignore_has_next_and_node_modules():
+    out = scaffold.build_publish_repo(_NEXT_FILES, "nextjs", "T")
+    assert ".gitignore" in out
+    assert "node_modules" in out[".gitignore"]
+    assert ".next" in out[".gitignore"]
+
+
+def test_build_publish_repo_unknown_framework_defaults_react():
+    out = scaffold.build_publish_repo(_SANDPACK, "unknown-fw", "T")
+    assert "vite.config.js" in out  # fell through to react/vite path
+
+
 # ── parse_uxmaster_response ──────────────────────────────────────────────────
 
 from agent.llm import strip_code_fences
