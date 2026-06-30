@@ -77,3 +77,42 @@ def test_intake_empty_prompt_returns_400():
     r = client.post("/api/intake", json={"prompt": "   "})
     assert r.status_code == 400
     assert "prompt" in r.json()["detail"].lower()
+
+
+# ── framework detection ──────────────────────────────────────────────────────
+
+
+def test_intake_defaults_framework_react():
+    """A normal request → framework defaults to react."""
+    ready = IntakeStep(ready=True, brief="Build a tic-tac-toe game.")
+    with patch("api.intake.chat_structured", return_value=ready):
+        r = client.post("/api/intake", json={"prompt": "a tic-tac-toe game"})
+    assert r.status_code == 200, r.text
+    assert r.json()["framework"] == "react"
+
+
+def test_intake_returns_static_on_explicit_cue():
+    ready = IntakeStep(ready=True, brief="Build a vanilla JS landing page.", framework="static")
+    with patch("api.intake.chat_structured", return_value=ready):
+        r = client.post("/api/intake", json={"prompt": "a plain HTML/CSS/JS landing page"})
+    assert r.status_code == 200, r.text
+    assert r.json()["framework"] == "static"
+
+
+def test_intake_returns_nextjs_on_explicit_cue():
+    asking = IntakeStep(ready=False, question="How many pages?", options=["1", "2+"], framework="nextjs")
+    with patch("api.intake.chat_structured", return_value=asking):
+        r = client.post("/api/intake", json={"prompt": "a Next.js app with routing"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["framework"] == "nextjs"   # present on question turns too
+    assert body["ready"] is False
+
+
+def test_intake_invalid_framework_coerced_to_react():
+    """An invalid framework from the model is coerced to react by the schema validator."""
+    bad = IntakeStep(ready=True, brief="Build it.", framework="svelte")
+    assert bad.framework == "react"
+    with patch("api.intake.chat_structured", return_value=bad):
+        r = client.post("/api/intake", json={"prompt": "build it"})
+    assert r.json()["framework"] == "react"

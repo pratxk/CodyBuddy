@@ -10,10 +10,10 @@ import api.generate as gen_module
 client = TestClient(app)
 
 
-def _fake_run_build(brief, emitter=None, premium=False):
+def _fake_run_build(brief, emitter=None, premium=False, framework="react"):
     """Fast fake run_build: no network calls, returns deterministic output."""
     plan = type("Plan", (), {"name": "TestApp"})()
-    return {"plan": plan, "files": {"/App.js": "console.log('hello');"}}
+    return {"plan": plan, "files": {"/App.js": "console.log('hello');"}, "framework": framework}
 
 
 def test_health():
@@ -101,3 +101,36 @@ def test_generate_start_accepts_premium_flag_non_admin():
         r = client.post("/api/generate/start", json={"brief": "social dashboard", "premium": True})
         assert r.status_code == 200
         assert "job_id" in r.json()
+
+
+# ── framework: request validation + threading + result event ─────────────────
+
+
+def test_generate_request_validates_framework():
+    from api.generate import GenerateRequest
+    assert GenerateRequest(brief="x", framework="nextjs").framework == "nextjs"
+    assert GenerateRequest(brief="x", framework="svelte").framework == "react"  # invalid → default
+    assert GenerateRequest(brief="x").framework == "react"                       # absent → default
+
+
+def test_generate_threads_framework_into_result(monkeypatch):
+    """framework flows start → run_build → result SSE event."""
+    captured = {}
+
+    def fake_run_build(brief, emitter=None, premium=False, framework="react"):
+        captured["framework"] = framework
+        plan = type("Plan", (), {"name": "StaticApp"})()
+        return {"plan": plan, "files": {"/index.html": "<h1>hi</h1>"}, "framework": framework}
+
+    monkeypatch.setattr("api.generate.run_build", fake_run_build)
+    monkeypatch.setattr("api.generate._persist_project", lambda *a, **k: None)
+
+    start = client.post("/api/generate/start", json={"brief": "a vanilla site", "framework": "static"})
+    assert start.status_code == 200
+    job_id = start.json()["job_id"]
+
+    sse = client.get(f"/api/generate/events/{job_id}")
+    events = [json.loads(l[len("data: "):]) for l in sse.text.splitlines() if l.startswith("data: ")]
+    result = next(e for e in events if e.get("type") == "result")
+    assert result["framework"] == "static"
+    assert captured["framework"] == "static"

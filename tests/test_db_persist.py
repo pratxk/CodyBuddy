@@ -34,6 +34,13 @@ def test_project_constructor_fields():
     assert "/App.js" in row.files
 
 
+def test_project_has_framework_column():
+    """Migration parity: the model declares a NOT NULL framework column defaulting to 'react'."""
+    col = Project.__table__.c["framework"]
+    assert col.nullable is False
+    assert col.server_default.arg == "react"
+
+
 def test_project_uuid_default():
     """Project id column has a Python-side default (uuid4) wired in the table metadata."""
     id_col = Project.__table__.c["id"]
@@ -217,6 +224,23 @@ def test_projects_get_shape(monkeypatch):
     assert body["id"] == pid
     assert "files" in body
     assert "brief" in body
+    # old row (SimpleNamespace lacks framework) → defaults to react
+    assert body["framework"] == "react"
+
+
+def test_projects_get_returns_framework(monkeypatch):
+    """A row carrying a framework returns it on the detail endpoint."""
+    import api.projects as proj_mod
+    fake_row = _make_fake_project_row()
+    fake_row.framework = "nextjs"
+    monkeypatch.setattr(proj_mod, "SessionLocal", lambda: _FakeDB(row=fake_row))
+
+    from fastapi.testclient import TestClient
+    from api.main import app
+    pid = "12345678-1234-5678-1234-567812345678"
+    resp = TestClient(app).get(f"/api/projects/{pid}")
+    assert resp.status_code == 200
+    assert resp.json()["framework"] == "nextjs"
 
 
 def test_projects_get_not_found(monkeypatch):

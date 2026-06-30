@@ -97,6 +97,61 @@ def test_slugify():
     assert scaffold.slugify("") == "app"
 
 
+# ── framework helpers + framework-aware normalize_files ──────────────────────
+
+
+def test_coerce_framework_valid_and_invalid():
+    assert scaffold.coerce_framework("static") == "static"
+    assert scaffold.coerce_framework("NextJS") == "nextjs"
+    assert scaffold.coerce_framework("vue") == "react"      # unknown → default
+    assert scaffold.coerce_framework(None) == "react"
+    assert scaffold.coerce_framework("") == "react"
+
+
+def test_detect_framework():
+    assert scaffold.detect_framework({"/app/page.tsx": "x", "/package.json": "{}"}) == "nextjs"
+    assert scaffold.detect_framework({"/index.html": "x", "/styles.css": "y", "/script.js": "z"}) == "static"
+    assert scaffold.detect_framework({"/App.js": "x", "/package.json": "{}"}) == "react"
+
+
+def test_normalize_static_no_react_or_package_json():
+    """static: never inject /App.js or /package.json; ensure /index.html exists."""
+    out = scaffold.normalize_files({"index.html": "<h1>hi</h1>", "script.js": "//"}, "static")
+    assert "/index.html" in out
+    assert "/App.js" not in out
+    assert "/package.json" not in out
+
+
+def test_normalize_static_injects_index_when_missing():
+    out = scaffold.normalize_files({"/styles.css": "body{}"}, "static")
+    assert "/index.html" in out
+    assert "script.js" in out["/index.html"]  # default entry links the vanilla script
+    assert "/package.json" not in out
+
+
+def test_normalize_nextjs_ensures_entry_and_next_dep():
+    files = {"/app/page.tsx": 'import Foo from "./foo";\nexport default function Page(){return null}'}
+    out = scaffold.normalize_files(files, "nextjs")
+    assert "/app/page.tsx" in out
+    assert "/App.js" not in out
+    deps = json.loads(out["/package.json"])["dependencies"]
+    assert deps.get("next")
+    assert "react" in deps and "react-dom" in deps
+
+
+def test_normalize_nextjs_injects_page_when_missing():
+    out = scaffold.normalize_files({"/app/globals.css": "body{}"}, "nextjs")
+    assert "/app/page.tsx" in out
+    assert "next" in json.loads(out["/package.json"])["dependencies"]
+
+
+def test_normalize_react_unchanged_default():
+    """react (default arg) keeps injecting /App.js + /package.json."""
+    out = scaffold.normalize_files({"App.js": "export default () => null"})
+    assert "/App.js" in out
+    assert "react" in json.loads(out["/package.json"])["dependencies"]
+
+
 # ── parse_uxmaster_response ──────────────────────────────────────────────────
 
 from agent.llm import strip_code_fences

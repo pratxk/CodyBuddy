@@ -114,6 +114,72 @@ def test_coder_node_emits_coder_chunk(monkeypatch):
     assert "FILE" in "".join(em.chunks)
 
 
+# ── framework-aware build + prompts ──────────────────────────────────────────
+
+
+def test_run_build_static_shapes_files_without_package_json(monkeypatch):
+    plan = Plan(name="Landing", description="site", techStack=["HTML", "CSS", "JavaScript"],
+                features=["hero"], files=[File(path="/index.html", purpose="entry")])
+    task_plan = TaskPlan(implementation_steps=[
+        ImplementationTask(filepath="/index.html", task_description="markup"),
+    ])
+    captured = {}
+
+    def fake_structured(prompt, schema, **kw):
+        return plan if schema is Plan else task_plan
+
+    def fake_chat_stream(prompt, *, system=None, **kw):
+        captured["system"] = system
+        return ("=== FILE: /index.html ===\n<!doctype html><h1>Hi</h1>\n"
+                "=== FILE: /styles.css ===\nbody{margin:0}\n"
+                "=== FILE: /script.js ===\nconsole.log('hi');\n")
+
+    monkeypatch.setattr(g, "chat_structured", fake_structured)
+    monkeypatch.setattr(g, "chat_stream", fake_chat_stream)
+
+    result = g.run_build("a plain html site", framework="static")
+    assert result["framework"] == "static"
+    assert "/index.html" in result["files"]
+    assert "/package.json" not in result["files"]   # static never injects npm
+    assert "/App.js" not in result["files"]
+    assert "vanilla" in captured["system"].lower()   # static system prompt used
+
+
+def test_run_build_nextjs_ensures_next_dep(monkeypatch):
+    plan = Plan(name="NextApp", description="next", techStack=["Next.js"],
+                features=["home"], files=[File(path="/app/page.tsx", purpose="entry")])
+    task_plan = TaskPlan(implementation_steps=[
+        ImplementationTask(filepath="/app/page.tsx", task_description="page"),
+    ])
+
+    def fake_structured(prompt, schema, **kw):
+        return plan if schema is Plan else task_plan
+
+    def fake_chat_stream(prompt, **kw):
+        return "=== FILE: /app/page.tsx ===\nexport default function Page(){return <h1>Hi</h1>;}\n"
+
+    monkeypatch.setattr(g, "chat_structured", fake_structured)
+    monkeypatch.setattr(g, "chat_stream", fake_chat_stream)
+
+    result = g.run_build("a next.js app", framework="nextjs")
+    assert result["framework"] == "nextjs"
+    import json as _json
+    deps = _json.loads(result["files"]["/package.json"])["dependencies"]
+    assert "next" in deps
+
+
+def test_prompts_vary_by_framework():
+    from agent.prompts import coder_prompt, coder_system_prompt, planner_prompt
+    steps = [{"filepath": "/index.html", "task_description": "x"}]
+    assert "index.html" in coder_prompt(steps, "{}", framework="static")
+    assert "/app/page.tsx" in coder_prompt(steps, "{}", framework="nextjs")
+    assert "vanilla" in coder_system_prompt("static").lower()
+    assert "app router" in coder_system_prompt("nextjs").lower()
+    assert "index.html" in planner_prompt("x", framework="static").lower()
+    # react default unchanged
+    assert "/App.js" in coder_system_prompt("react")
+
+
 # ── parse_multi_file_response unit tests ─────────────────────────────────────
 
 def test_parse_multi_file_basic():
