@@ -13,7 +13,8 @@ from pydantic import BaseModel
 
 from agent.llm import CODER_CHAIN, CODER_CHAIN_PREMIUM, chat, strip_code_fences
 from agent.prompts import CODER_SYSTEM_PROMPT, vibe_prompt
-from agent.scaffold import normalize_files, parse_reply_and_files
+from agent.scaffold import (detect_framework, normalize_files,
+                           parse_reply_and_files)
 from auth.dependencies import get_current_user
 from db.database import SessionLocal
 from db.models import Project, User
@@ -59,7 +60,9 @@ def enhance(
     # ponytail: ONE call emits both the conversational reply and the files.
     reply, parsed = parse_reply_and_files(raw, strip_code_fences)
     reply = reply or "Applied your changes."
-    updated_files = normalize_files(parsed)
+    # ponytail: infer framework from the incoming files so static/next apps aren't React-normalized.
+    # The vibe prompt itself stays React-worded for this pass (acceptable per spec).
+    updated_files = normalize_files(parsed, detect_framework(req.files))
 
     project_id = _upsert_project(req.project_id, current_user.id, req.instruction, updated_files)
     return EnhanceResponse(project_id=project_id, files=updated_files, reply=reply)

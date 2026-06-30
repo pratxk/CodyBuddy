@@ -14,7 +14,8 @@ from pydantic import BaseModel
 
 from agent.llm import VISION_CHAIN, chat_vision
 from agent.prompts import CODER_SYSTEM_PROMPT, uxmaster_prompt
-from agent.scaffold import normalize_files, parse_uxmaster_response
+from agent.scaffold import (detect_framework, normalize_files,
+                           parse_uxmaster_response)
 from agent.llm import strip_code_fences
 from api.enhance import _upsert_project  # ponytail: reuse the same owned-project upsert
 from auth.dependencies import get_current_user
@@ -64,7 +65,7 @@ def uxmaster(
     # ponytail: ONE call emits the conversational reply, the verify boolean, and the files.
     reply, needs_verification, parsed = parse_uxmaster_response(raw, strip_code_fences)
     reply = reply or "Reviewed your screenshot and refined the UI."
-    updated_files = normalize_files(parsed)
+    updated_files = normalize_files(parsed, detect_framework(req.files))
 
     label = instruction or "screenshot review"
     project_id = _upsert_project(req.project_id, current_user.id, f"UX Master: {label}", updated_files)

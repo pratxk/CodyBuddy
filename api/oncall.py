@@ -14,7 +14,8 @@ from pydantic import BaseModel
 
 from agent.llm import CODER_CHAIN, chat, strip_code_fences
 from agent.prompts import CODER_SYSTEM_PROMPT, oncall_prompt
-from agent.scaffold import normalize_files, parse_multi_file_response
+from agent.scaffold import (detect_framework, normalize_files,
+                           parse_multi_file_response)
 from api.enhance import _upsert_project
 from auth.dependencies import get_current_user
 from db.models import User
@@ -52,7 +53,7 @@ def oncall(
         max_tokens=8192,
     )
     parsed = parse_multi_file_response(raw, strip_code_fences)
-    fixed_files = normalize_files(parsed)
+    fixed_files = normalize_files(parsed, detect_framework(req.files))
 
     # ponytail: brief stored as the error string (truncated) so the project row is meaningful
     brief = f"OnCall fix: {req.error[:120]}"
