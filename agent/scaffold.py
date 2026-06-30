@@ -3,6 +3,31 @@ import re
 
 SANDPACK_TEMPLATE = "react"
 
+# ponytail: the three app shapes the generator can produce. "react" is the default and
+# keeps all historical behavior; "static" = plain HTML/CSS/JS; "nextjs" = App Router.
+FRAMEWORKS: tuple[str, ...] = ("react", "static", "nextjs")
+
+
+def coerce_framework(value) -> str:
+    """Validate a framework string at a boundary; unknown/invalid → 'react' (the default)."""
+    v = value.strip().lower() if isinstance(value, str) else ""
+    return v if v in FRAMEWORKS else "react"
+
+
+def detect_framework(files: dict[str, str]) -> str:
+    """Infer the framework of an existing file set (for enhance/oncall/uxmaster which only
+    receive files). Next.js wins on app/ or pages/ routes; static on a bundler-free index.html;
+    everything else is react (the default)."""
+    norm = {(k if k.startswith("/") else "/" + k) for k in files}
+    if any(k.startswith(("/app/", "/pages/")) for k in norm) or "/next.config.js" in norm:
+        return "nextjs"
+    has_index = "/index.html" in norm
+    has_react_entry = any(k in norm for k in ("/App.js", "/App.jsx"))
+    has_pkg = "/package.json" in norm
+    if has_index and not has_react_entry and not has_pkg:
+        return "static"
+    return "react"
+
 _FILE_HEADER_RE = re.compile(r"^=== FILE: (.+?) ===$", re.MULTILINE)
 _REPLY_HEADER_RE = re.compile(r"^=== REPLY ===\s*$", re.MULTILINE)
 _VERIFY_HEADER_RE = re.compile(r"^=== VERIFY ===\s*$", re.MULTILINE)
@@ -158,11 +183,86 @@ def default_package_json(name: str, extra_deps: dict[str, str] | None = None) ->
     return json.dumps(pkg, indent=2)
 
 
-def normalize_files(files: dict[str, str]) -> dict[str, str]:
+NEXT_BASE_DEPENDENCIES: dict[str, str] = {
+    "next": "^14.2.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+}
+
+_DEFAULT_STATIC_INDEX = (
+    "<!doctype html>\n"
+    '<html lang="en">\n'
+    "  <head>\n"
+    '    <meta charset="UTF-8" />\n'
+    '    <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n'
+    "    <title>App</title>\n"
+    '    <link rel="stylesheet" href="styles.css" />\n'
+    "  </head>\n"
+    "  <body>\n"
+    "    <h1>Empty app</h1>\n"
+    '    <script src="script.js" defer></script>\n'
+    "  </body>\n"
+    "</html>\n"
+)
+
+_DEFAULT_NEXT_PAGE = (
+    "export default function Page() {\n"
+    "  return (\n"
+    "    <main>\n"
+    "      <h1>Empty app</h1>\n"
+    "    </main>\n"
+    "  );\n"
+    "}\n"
+)
+
+_NEXT_ENTRY_KEYS = ("/app/page.tsx", "/app/page.jsx", "/pages/index.tsx", "/pages/index.js")
+
+
+def _ensure_next_package_json(files: dict[str, str]) -> dict[str, str]:
+    """Guarantee /package.json exists and declares next/react/react-dom (Sandpack nextjs)."""
+    key = "/package.json"
+    try:
+        pkg = json.loads(files[key]) if key in files else {}
+    except (json.JSONDecodeError, TypeError):
+        pkg = {}
+    if not isinstance(pkg, dict):
+        pkg = {}
+    pkg.setdefault("name", "sandbox-app")
+    pkg.setdefault("version", "1.0.0")
+    deps = pkg.get("dependencies") or {}
+    for name, version in NEXT_BASE_DEPENDENCIES.items():
+        deps.setdefault(name, version)
+    pkg["dependencies"] = deps
+    out = dict(files)
+    out[key] = json.dumps(pkg, indent=2)
+    return out
+
+
+def normalize_files(files: dict[str, str], framework: str = "react") -> dict[str, str]:
+    """Normalize an LLM file set to a bootable Sandpack project for the given framework.
+
+    Default 'react' keeps every historical caller working unchanged.
+    """
+    framework = coerce_framework(framework)
     out: dict[str, str] = {}
     for path, content in files.items():
         key = path if path.startswith("/") else "/" + path
         out[key] = content
+
+    if framework == "static":
+        # plain HTML/CSS/JS — NO React entry, NO package.json, NO npm dependency scan.
+        if "/index.html" not in out:
+            out["/index.html"] = _DEFAULT_STATIC_INDEX
+        return out
+
+    if framework == "nextjs":
+        # App Router — ensure an entry page + next/react/react-dom deps, then declare extras.
+        if not any(k in out for k in _NEXT_ENTRY_KEYS):
+            out["/app/page.tsx"] = _DEFAULT_NEXT_PAGE
+        out = _ensure_next_package_json(out)
+        return ensure_dependencies(out)
+
+    # react (default) — unchanged behavior.
     if "/App.js" not in out and "/App.jsx" not in out:
         out["/App.js"] = (
             "export default function App() {\n"
