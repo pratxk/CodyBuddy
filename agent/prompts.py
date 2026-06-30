@@ -59,6 +59,22 @@ PREMIUM_GUIDELINES = """PREMIUM PRODUCTION-GRADE MODE (this build must look like
   chart components + a seed-data module + styles). Do NOT collapse it into one or two big files."""
 
 
+# ── Framework selection ──────────────────────────────────────────────────────
+# The intake reasons about which app shape to build. Values must match
+# agent.scaffold.FRAMEWORKS exactly: "react" (default) | "static" | "nextjs".
+
+FRAMEWORK_SELECTION_RULE = """FRAMEWORK CHOICE — pick exactly one of "react" | "static" | "nextjs":
+- "react" (DEFAULT): use for almost everything — a normal request like "a tic-tac-toe game",
+  "a dashboard", "a todo app". When in doubt, choose "react". NEVER invent a framework the
+  user didn't imply.
+- "static": ONLY when the user explicitly asks for vanilla JS / plain HTML-CSS-JS / a static
+  site / "no framework" / "no React".
+- "nextjs": ONLY when the user explicitly asks for Next.js / Next / the app router / a
+  multi-page app with routing.
+You MAY ask ONE clarifying question about the framework ONLY if the request is sparse AND the
+framework genuinely changes the build; otherwise default to "react" silently."""
+
+
 def intake_prompt(prompt: str, history: list[dict]) -> str:
     """Build the INTAKE self-gating prompt.
 
@@ -70,13 +86,16 @@ def intake_prompt(prompt: str, history: list[dict]) -> str:
         )
     else:
         history_text = "  (none yet)"
-    return f"""You are the INTAKE agent for an app generator that builds small React SPAs.
-Decide whether the user's request is specific enough to build a good first version.
+    return f"""You are the INTAKE agent for an app generator that builds small web apps.
+Decide whether the user's request is specific enough to build a good first version,
+AND decide which framework to build it as.
 
 User's original request: {prompt}
 
 Answers gathered so far:
 {history_text}
+
+{FRAMEWORK_SELECTION_RULE}
 
 You are a SENIOR product engineer scoping a build. Ask the sharp, high-leverage questions a
 pro would ask before building — but never interrogate past what changes the build.
@@ -101,38 +120,119 @@ Decision rules:
   (usually after 2-4 answers for complex apps). When ready, write a RICH `brief` (2-4 sentences)
   that folds in every answer and names the concrete features/metrics/charts/interactions to build.
 
+Always include your current best `framework` choice ("react" | "static" | "nextjs") on EVERY
+turn — both when asking a question and when ready.
+
 Respond with ONLY valid JSON — no prose, no markdown, no code fences:
 {{
   "ready": false,
   "question": "What kind of app do you want to build?",
   "options": ["A game", "A productivity tool", "A data dashboard", "A creative toy"],
-  "brief": null
+  "brief": null,
+  "framework": "react"
 }}
 OR, when ready:
 {{
   "ready": true,
   "question": null,
   "options": [],
-  "brief": "Build a tic-tac-toe game with a 3x3 board and a running score for X and O."
+  "brief": "Build a tic-tac-toe game with a 3x3 board and a running score for X and O.",
+  "framework": "react"
 }}"""
 
 
-def planner_prompt(user_prompt: str, premium: bool = False) -> str:
+# ── Per-framework file-shape guidance (planner + architect + coder share this) ──
+# react reproduces the original wording verbatim so its behavior is unchanged.
+
+_PLANNER_INTRO = {
+    "react": 'a React app that will run in a CodeSandbox Sandpack\n"react" sandbox '
+             "(CRA-style, entry file is /App.js)",
+    "static": 'a STATIC HTML/CSS/JS site that will run in a CodeSandbox Sandpack\n"static" '
+              "sandbox (entry file is /index.html — no build step)",
+    "nextjs": 'a Next.js 14 (App Router) app that will run in a CodeSandbox Sandpack\n"nextjs" '
+              "sandbox (entry route is /app/page.tsx)",
+}
+
+_PLANNER_RULES = {
+    "react": """- Output a CLIENT-SIDE React SPA only (no server, no Node backend, no native deps).
+- Entry component MUST be /App.js. Put extra components under /components/.
+- ALWAYS include a /styles.css file in the plan (the app must be styled, not bare HTML).
+- Use npm packages resolvable from a CDN — react, react-dom, and for data viz prefer
+  `recharts`; date-fns for dates; etc. List them in techStack.""",
+    "static": """- Output a STATIC site: plain HTML + CSS + VANILLA JS. NO React, NO JSX, NO build step,
+  NO npm, NO package.json, NO bundler, NO ES-module imports.
+- Entry MUST be /index.html — it links <link rel="stylesheet" href="styles.css"> in <head>
+  and <script src="script.js" defer></script> before </body>.
+- Plan exactly these files (add more .css/.js only if truly needed): /index.html, /styles.css,
+  /script.js.
+- All interactivity is vanilla DOM JS (document.querySelector, addEventListener, classList).
+  The app MUST render by simply opening index.html — no server, no transpile.""",
+    "nextjs": """- Output a SELF-CONTAINED Next.js 14 App Router app (no external DB/services; seed data in memory).
+- Required files: /package.json (deps: next, react, react-dom), /app/layout.tsx (root layout that
+  renders <html><body>{{children}}</body></html> and imports "./globals.css"), /app/page.tsx (the
+  entry page), /app/globals.css. Add more routes as /app/<route>/page.tsx and components under
+  /app/components/*.tsx as needed.
+- Use idiomatic Next 14: Server Components by default; add "use client" ONLY to components that use
+  hooks/handlers. NO pages-router APIs (no getServerSideProps/getStaticProps).
+- Use TypeScript (.tsx/.ts). For data viz prefer `recharts`; list extra npm packages in techStack.""",
+}
+
+_PLANNER_TECHSTACK = {
+    "react": '["React", "CSS"]',
+    "static": '["HTML", "CSS", "JavaScript"]',
+    "nextjs": '["Next.js", "React", "TypeScript", "CSS"]',
+}
+
+_PLANNER_FILES = {
+    "react": """    {{"path": "/App.js", "purpose": "root component; imports ./styles.css"}},
+    {{"path": "/styles.css", "purpose": "modern, polished styling for the whole app"}},
+    {{"path": "/components/Board.js", "purpose": "..."}}""",
+    "static": """    {{"path": "/index.html", "purpose": "entry; links styles.css and script.js"}},
+    {{"path": "/styles.css", "purpose": "modern, polished styling for the whole app"}},
+    {{"path": "/script.js", "purpose": "vanilla DOM logic and interactivity"}}""",
+    "nextjs": """    {{"path": "/package.json", "purpose": "deps: next, react, react-dom"}},
+    {{"path": "/app/layout.tsx", "purpose": "root layout; renders <html><body>; imports ./globals.css"}},
+    {{"path": "/app/page.tsx", "purpose": "entry page"}},
+    {{"path": "/app/globals.css", "purpose": "modern, polished global styling"}}""",
+}
+
+_ARCH_CONNECT = {
+    "react": '/App.js imports the components AND imports\n"./styles.css". The /styles.css step '
+             "must describe concrete, attractive styling (palette,\nlayout, button/input states) "
+             "— not a placeholder.",
+    "static": "/index.html links styles.css and script.js and contains the markup skeleton; "
+              "script.js\nwires DOM behavior; the styles.css step must describe concrete, "
+              "attractive styling (palette,\nlayout, button/input states) — not a placeholder.",
+    "nextjs": '/app/layout.tsx imports "./globals.css" and renders <html><body>; /app/page.tsx is '
+              "the entry;\ncomponents live under /app/components. The globals.css step must describe "
+              "concrete, attractive\nstyling (palette, layout, button/input states) — not a placeholder.",
+}
+
+_ARCH_EXAMPLE = {
+    "react": """    {{"filepath": "/styles.css", "task_description": "concrete modern styling: ..."}},
+    {{"filepath": "/components/Board.js", "task_description": "detailed instructions"}},
+    {{"filepath": "/App.js", "task_description": "imports ./styles.css and composes components"}}""",
+    "static": """    {{"filepath": "/styles.css", "task_description": "concrete modern styling: ..."}},
+    {{"filepath": "/index.html", "task_description": "markup skeleton; links styles.css + script.js"}},
+    {{"filepath": "/script.js", "task_description": "vanilla DOM logic wired to the markup"}}""",
+    "nextjs": """    {{"filepath": "/app/globals.css", "task_description": "concrete modern global styling: ..."}},
+    {{"filepath": "/app/layout.tsx", "task_description": "root layout; imports ./globals.css"}},
+    {{"filepath": "/app/page.tsx", "task_description": "entry page composing the components"}}""",
+}
+
+
+def planner_prompt(user_prompt: str, premium: bool = False, framework: str = "react") -> str:
+    fw = framework if framework in _PLANNER_INTRO else "react"
     premium_block = f"\n{PREMIUM_GUIDELINES}\n" if premium else ""
-    return f"""You are the PLANNER for a React app that will run in a CodeSandbox Sandpack
-"react" sandbox (CRA-style, entry file is /App.js). Turn the request into a build plan.
+    return f"""You are the PLANNER for {_PLANNER_INTRO[fw]}. Turn the request into a build plan.
 
 User's request: {user_prompt}
 {premium_block}
 
 Rules:
-- Output a CLIENT-SIDE React SPA only (no server, no Node backend, no native deps).
-- Entry component MUST be /App.js. Put extra components under /components/.
-- ALWAYS include a /styles.css file in the plan (the app must be styled, not bare HTML).
-- Use npm packages resolvable from a CDN — react, react-dom, and for data viz prefer
-  `recharts`; date-fns for dates; etc. List them in techStack.
+{_PLANNER_RULES[fw]}
 - AMBITION: design a genuinely CAPABLE, production-feeling first version — NOT a toy. Decompose
-  into several real components (5-9 files is normal for a rich app). For a "dashboard", plan
+  into several real components/sections (5-9 files is normal for a rich app). For a "dashboard", plan
   MULTIPLE metric cards, 2+ charts (different types), a data table/list, and filters/controls;
   if the user said "real-time", plan simulated live data that updates on an interval. Cover the
   core feature deeply with sensible realistic seed data — a reviewer should think "this is a
@@ -144,25 +244,22 @@ Respond with ONLY valid JSON — no prose, no markdown, no code fences:
 {{
   "name": "App Name",
   "description": "one-line description",
-  "techStack": ["React", "CSS"],
+  "techStack": {_PLANNER_TECHSTACK[fw]},
   "features": ["feature 1", "feature 2"],
   "files": [
-    {{"path": "/App.js", "purpose": "root component; imports ./styles.css"}},
-    {{"path": "/styles.css", "purpose": "modern, polished styling for the whole app"}},
-    {{"path": "/components/Board.js", "purpose": "..."}}
+{_PLANNER_FILES[fw]}
   ]
 }}"""
 
 
-def architect_prompt(plan_json: str, premium: bool = False) -> str:
+def architect_prompt(plan_json: str, premium: bool = False, framework: str = "react") -> str:
+    fw = framework if framework in _ARCH_CONNECT else "react"
     premium_block = f"\n{PREMIUM_GUIDELINES}\n" if premium else ""
     return f"""You are the ARCHITECT. Break the plan into ordered, self-contained
 implementation steps — one per file.{premium_block}
 
 For each step specify exactly what to implement (component names, props, state, handlers)
-and how files connect (imports/exports). /App.js imports the components AND imports
-"./styles.css". The /styles.css step must describe concrete, attractive styling (palette,
-layout, button/input states) — not a placeholder. Order dependencies first. Each step
+and how files connect (imports/exports). {_ARCH_CONNECT[fw]} Order dependencies first. Each step
 must be self-contained.
 
 {DESIGN_GUIDELINES}
@@ -173,9 +270,7 @@ Project plan (JSON):
 Respond with ONLY valid JSON — no prose, no markdown, no code fences:
 {{
   "implementation_steps": [
-    {{"filepath": "/styles.css", "task_description": "concrete modern styling: ..."}},
-    {{"filepath": "/components/Board.js", "task_description": "detailed instructions"}},
-    {{"filepath": "/App.js", "task_description": "imports ./styles.css and composes components"}}
+{_ARCH_EXAMPLE[fw]}
   ]
 }}"""
 
@@ -205,24 +300,53 @@ CODER_SYSTEM_PROMPT = (
 )
 
 
-def coder_prompt(task_steps: list[dict], plan_json: str, premium: bool = False) -> str:
-    """Build the single-call prompt that generates ALL app files at once."""
-    steps_text = "\n".join(
-        f"  {i+1}. {s['filepath']}: {s['task_description']}"
-        for i, s in enumerate(task_steps)
-    )
-    file_list = ", ".join(s["filepath"] for s in task_steps)
-    premium_block = f"\n{PREMIUM_GUIDELINES}\n" if premium else ""
-    return f"""Project plan:
-{plan_json}
+_STATIC_SYSTEM_PROMPT = (
+    "You are the CODER. You implement ALL files of a STATIC HTML/CSS/JS site in ONE response, "
+    "for a CodeSandbox Sandpack 'static' sandbox (entry /index.html). NO React, NO JSX, NO npm, "
+    "NO package.json, NO bundler, NO ES-module imports — plain HTML5, CSS, and VANILLA browser JS. "
+    "/index.html links <link rel=\"stylesheet\" href=\"styles.css\"> in <head> and "
+    "<script src=\"script.js\" defer></script> before </body>. "
+    "Wire all interactivity with vanilla DOM JS (document.querySelector, addEventListener, "
+    "classList, textContent) — the page MUST render and work by simply opening index.html. "
+    "CORRECTNESS: guard every querySelector result before use; attach listeners after DOMContentLoaded "
+    "(or use defer); no undefined globals; no console errors. "
+    "PRODUCE VISUALLY POLISHED UIs: use CSS variables for color tokens, a gradient accent on the "
+    "header/primary buttons, system font stack, rem-based type scale, comfortable spacing, rounded "
+    "corners (12-16px), soft box-shadows, a responsive container, smooth 0.2s transitions, hover/active "
+    "states, focus-visible outlines, and a fadeInUp keyframe. Write real, complete, modern CSS."
+)
 
-Implementation steps (for ALL files you must produce):
-{steps_text}
+_NEXTJS_SYSTEM_PROMPT = (
+    "You are the CODER. You implement ALL files of a Next.js 14 App Router app in ONE response, "
+    "for a CodeSandbox Sandpack 'nextjs' sandbox. Entry route is /app/page.tsx; /app/layout.tsx is "
+    "the root layout that renders <html><body>{children}</body></html> and imports \"./globals.css\". "
+    "Use TypeScript (.tsx/.ts) and idiomatic Next 14: Server Components by default, with the "
+    "\"use client\" directive at the TOP of any file that uses hooks (useState/useEffect) or event "
+    "handlers. NO pages-router APIs. Keep it SELF-CONTAINED (in-memory/seed data, no external services). "
+    "/package.json MUST declare next, react, and react-dom. Import components by relative path; EVERY "
+    "imported file MUST be emitted in this response — no orphan imports. Only CDN-resolvable npm packages. "
+    "CORRECTNESS: never render an object/array directly as a JSX child; initialize state before use; "
+    "guard .map over possibly-undefined data; stable list keys; the app must build and run with NO errors. "
+    "PRODUCE VISUALLY POLISHED UIs: CSS variables for color tokens, a gradient accent on the header/primary "
+    "buttons, system font stack, rem-based type scale, rounded corners (12-16px), soft box-shadows, smooth "
+    "0.2s transitions, hover/active states, focus-visible outlines. Write real, complete, modern CSS in globals.css."
+)
 
-{DESIGN_GUIDELINES}
-{premium_block}
+_CODER_SYSTEM_PROMPTS = {
+    "react": CODER_SYSTEM_PROMPT,
+    "static": _STATIC_SYSTEM_PROMPT,
+    "nextjs": _NEXTJS_SYSTEM_PROMPT,
+}
 
-FUNCTIONAL COMPLETENESS RULES (non-negotiable):
+
+def coder_system_prompt(framework: str = "react") -> str:
+    """Pick the CODER system prompt for the framework (defaults to react)."""
+    return _CODER_SYSTEM_PROMPTS.get(framework, CODER_SYSTEM_PROMPT)
+
+
+# Per-framework coder body: completeness rules + the file-format example header.
+_CODER_RULES = {
+    "react": """FUNCTIONAL COMPLETENESS RULES (non-negotiable):
 - App.js MUST render the ENTIRE feature UI — not just a shell.
 - EVERY component imported by ANY file must be defined in this response.
 - ONE source of truth for app state: lift shared state to App.js and pass props down.
@@ -242,14 +366,68 @@ BUILD A CAPABLE, PRODUCTION-FEELING APP — NOT A STUB:
 - GAMES/grids: CSS Grid with sized bordered clickable cells (font-size:2rem+ for marks);
   real win/score logic wired to outcomes — a real playable board, not text.
 - Charts via recharts must be wrapped in <ResponsiveContainer width="100%" height={...}> and
-  use the palette tokens; add recharts to /package.json dependencies.
+  use the palette tokens; add recharts to /package.json dependencies.""",
+    "static": """FUNCTIONAL COMPLETENESS RULES (non-negotiable):
+- /index.html MUST contain the FULL markup skeleton; /script.js MUST wire the ENTIRE feature
+  with vanilla DOM JS — not a shell. NO React, NO JSX, NO imports, NO package.json.
+- Every element script.js touches must exist in index.html; guard every querySelector.
+- Build/initialize the UI on DOMContentLoaded (or rely on `defer`).
+
+BUILD A CAPABLE, POLISHED APP — NOT A STUB:
+- Implement the FULL feature set with real interactivity driven by event listeners and state held
+  in plain JS variables/objects; re-render the relevant DOM on change. A reviewer should think
+  "this is a real app".
+- GAMES/grids: build the grid in HTML (or generate cells in JS), style sized bordered clickable
+  cells via CSS Grid, and wire real win/score logic to clicks.
+- For charts WITHOUT a library, draw with <canvas> or styled divs; data lives in JS arrays.
+- "REAL-TIME": use setInterval to update state + DOM every 1-2s; clearInterval when appropriate.""",
+    "nextjs": """FUNCTIONAL COMPLETENESS RULES (non-negotiable):
+- /app/page.tsx MUST render the ENTIRE feature UI; /app/layout.tsx imports "./globals.css" and
+  renders <html><body>{children}</body></html>.
+- EVERY component imported by ANY file MUST be defined in this response — no orphan imports.
+- Put "use client" at the TOP of any file using hooks or event handlers. Server Components otherwise.
+- ONE source of truth for shared state: lift it into the page (a client component) and pass props down.
+
+BUILD A CAPABLE, PRODUCTION-FEELING APP — NOT A STUB:
+- Implement the FULL feature set with real interactivity — a reviewer should think "this is a real app".
+- DASHBOARDS: MULTIPLE metric/stat cards (value, label, delta), 2+ charts of DIFFERENT types via
+  `recharts` (each in <ResponsiveContainer>), AND a data table/list, plus working filters. Seed with
+  rich realistic data (15-30+ points). recharts needs "use client"; add it to /package.json.
+- Multi-page: add routes as /app/<route>/page.tsx and link with next/link.
+- "REAL-TIME": a client component with useEffect+setInterval updating state every 1-2s; cleanup on unmount.""",
+}
+
+_CODER_FORMAT_EXAMPLE = {
+    "react": "=== FILE: /styles.css ===\n(full file body here)\n=== FILE: /App.js ===\n(full file body here)",
+    "static": "=== FILE: /index.html ===\n(full file body here)\n=== FILE: /styles.css ===\n(full file body here)\n=== FILE: /script.js ===\n(full file body here)",
+    "nextjs": "=== FILE: /app/globals.css ===\n(full file body here)\n=== FILE: /app/layout.tsx ===\n(full file body here)\n=== FILE: /app/page.tsx ===\n(full file body here)",
+}
+
+
+def coder_prompt(task_steps: list[dict], plan_json: str, premium: bool = False,
+                 framework: str = "react") -> str:
+    """Build the single-call prompt that generates ALL app files at once."""
+    fw = framework if framework in _CODER_RULES else "react"
+    steps_text = "\n".join(
+        f"  {i+1}. {s['filepath']}: {s['task_description']}"
+        for i, s in enumerate(task_steps)
+    )
+    file_list = ", ".join(s["filepath"] for s in task_steps)
+    premium_block = f"\n{PREMIUM_GUIDELINES}\n" if premium else ""
+    return f"""Project plan:
+{plan_json}
+
+Implementation steps (for ALL files you must produce):
+{steps_text}
+
+{DESIGN_GUIDELINES}
+{premium_block}
+
+{_CODER_RULES[fw]}
 
 Output ALL {len(task_steps)} files in this EXACT format — no prose before/after, no markdown fences around the file delimiter lines:
 
-=== FILE: /styles.css ===
-(full file body here)
-=== FILE: /App.js ===
-(full file body here)
+{_CODER_FORMAT_EXAMPLE[fw]}
 
 Files to emit (in dependency order — dependencies before consumers): {file_list}
 
