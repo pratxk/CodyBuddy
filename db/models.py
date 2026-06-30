@@ -51,6 +51,11 @@ class Project(Base):
     title: Mapped[str] = mapped_column(String, nullable=False)
     brief: Mapped[str] = mapped_column(Text, nullable=False)
     files: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    # ponytail: which framework this app was generated as ("react" | "static" | "nextjs").
+    # Existing Neon rows need scripts/migrate_add_framework.sql (create_all won't ALTER).
+    framework: Mapped[str] = mapped_column(
+        String, nullable=False, default="react", server_default="react"
+    )
     # ponytail: session-history columns; existing Neon rows need
     # scripts/migrate_add_session_history.sql (create_all won't ALTER).
     chat: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
