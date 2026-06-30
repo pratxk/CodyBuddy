@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 
-from agent.scaffold import slugify, to_vite_project
+from agent.scaffold import build_publish_repo, slugify
 from auth.crypto import decrypt
 from auth.dependencies import get_current_user
 from db.database import SessionLocal
@@ -90,7 +90,7 @@ def publish_project(
     project_id: str,
     current_user: User = Depends(get_current_user),
 ) -> PublishResponse:
-    """Transform a project's Sandpack files into a Vite repo and push it to the user's GitHub."""
+    """Build a framework-aware deployable repo from a project's files and push it to GitHub."""
     try:
         pid = uuid.UUID(project_id)
     except ValueError:
@@ -105,10 +105,12 @@ def publish_project(
         raise HTTPException(status_code=400, detail="Connect GitHub first")
     token = decrypt(enc)
 
-    vite_files = to_vite_project(row.files, row.title)
+    # Old rows that predate the framework column default to "react".
+    framework = getattr(row, "framework", None) or "react"
+    repo_files = build_publish_repo(row.files, framework, row.title)
     repo_name = f"appsmith-{slugify(row.title)}"
     try:
-        repo_url = publish_files(token, repo_name, vite_files)
+        repo_url = publish_files(token, repo_name, repo_files)
     except GitHubError as exc:
         logger.error("GitHub publish failed for project %s: %s", project_id, exc)
         raise HTTPException(status_code=502, detail=str(exc))
