@@ -9,32 +9,16 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from auth.dependencies import get_current_user
+from auth.roles import SUPER_ADMIN_EMAILS, ensure_role as _ensure_role, resolve_role as _resolve_role
 from auth.utils import create_access_token, hash_password, verify_password
 from db.database import get_db
 from db.models import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# ponytail: small allowlist drives the SUPER_ADMIN role (env-overridable, comma-separated).
-SUPER_ADMIN_EMAILS: set[str] = {
-    e.strip().lower()
-    for e in os.environ.get("SUPER_ADMIN_EMAILS", "proff.pratiksingh@gmail.com").split(",")
-    if e.strip()
-}
-
-
-def _resolve_role(email: str) -> str:
-    """Role is fully determined by the email allowlist (case-insensitive)."""
-    return "SUPER_ADMIN" if (email or "").lower() in SUPER_ADMIN_EMAILS else "user"
-
-
-def _ensure_role(user: User, db: Session) -> str:
-    """Resolve the user's role; persist an upgrade to SUPER_ADMIN when allowlisted."""
-    role = _resolve_role(user.email)
-    if role == "SUPER_ADMIN" and getattr(user, "role", None) != "SUPER_ADMIN":
-        user.role = "SUPER_ADMIN"
-        db.commit()
-    return role
+# Role logic (allowlist) now lives in auth.roles so get_current_user can apply it
+# on every authenticated request — re-exported here for the auth endpoints.
+__all__ = ["router", "SUPER_ADMIN_EMAILS"]
 
 
 class SignupRequest(BaseModel):

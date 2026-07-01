@@ -4,6 +4,7 @@ FastAPI dependency for authenticated routes.
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
+from auth.roles import ensure_role
 from auth.utils import decode_access_token
 from db.database import get_db
 from db.models import User
@@ -23,4 +24,12 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # The email allowlist is authoritative on EVERY authenticated request — not
+    # just login — so downstream gates (e.g. premium generation) never see a
+    # stale role='user' for an allowlisted SUPER_ADMIN. Idempotent after the
+    # first upgrade. Non-fatal if the write fails (still returns the user).
+    try:
+        ensure_role(user, db)
+    except Exception:
+        db.rollback()
     return user
