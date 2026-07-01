@@ -155,3 +155,22 @@ def update_history(
         row.oncall_log = body.oncall_log
         db.commit()
     return {"ok": True}
+
+
+@router.delete("/{project_id}")
+def delete_project(project_id: str, current_user: User = Depends(get_current_user)) -> dict:
+    """Delete a project the authed user owns. 404 (not 403) for missing or
+    someone else's project — we don't reveal that another user's id exists.
+    Idempotent from the client's view: the chat/oncall_log live inline on the
+    row, so deleting the row removes the whole session."""
+    try:
+        pid = uuid.UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Project not found")
+    with SessionLocal() as db:
+        row = db.get(Project, pid)
+        if not row or row.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Project not found")
+        db.delete(row)
+        db.commit()
+    return {"ok": True}

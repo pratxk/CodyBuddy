@@ -76,6 +76,9 @@ class _FakeDB:
     def get(self, model, pk):
         return self._get_row
 
+    def delete(self, row):
+        self.deleted = row
+
     def commit(self):
         self.committed = True
 
@@ -189,6 +192,49 @@ def test_put_history_unauthenticated_returns_401():
         f"/api/projects/{_PROJECT_ID_STR}/history",
         json={"chat": [], "oncall_log": []},
     )
+    assert resp.status_code == 401
+
+
+# ── DELETE /api/projects/{id} — owner-gated session delete ───────────────────
+
+
+def test_delete_project_owner_removes_row(monkeypatch):
+    import api.projects as proj_mod
+    row = _make_project_row()
+    db = _FakeDB(row=row)
+    monkeypatch.setattr(proj_mod, "SessionLocal", lambda: db)
+    resp = client.delete(f"/api/projects/{_PROJECT_ID_STR}")
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True}
+    assert db.deleted is row
+    assert db.committed
+
+
+def test_delete_project_wrong_user_returns_404(monkeypatch):
+    import api.projects as proj_mod
+    other_id = uuid.UUID("bbbbcccc-dddd-eeee-ffff-000011112222")
+    db = _FakeDB(row=_make_project_row(user_id=other_id))
+    monkeypatch.setattr(proj_mod, "SessionLocal", lambda: db)
+    resp = client.delete(f"/api/projects/{_PROJECT_ID_STR}")
+    assert resp.status_code == 404
+    assert getattr(db, "deleted", None) is None
+
+
+def test_delete_project_not_found_returns_404(monkeypatch):
+    import api.projects as proj_mod
+    monkeypatch.setattr(proj_mod, "SessionLocal", lambda: _FakeDB(row=None))
+    resp = client.delete(f"/api/projects/{_PROJECT_ID_STR}")
+    assert resp.status_code == 404
+
+
+def test_delete_project_invalid_uuid_returns_404():
+    resp = client.delete("/api/projects/not-a-uuid")
+    assert resp.status_code == 404
+
+
+@pytest.mark.real_auth
+def test_delete_project_unauthenticated_returns_401():
+    resp = client.delete(f"/api/projects/{_PROJECT_ID_STR}")
     assert resp.status_code == 401
 
 
