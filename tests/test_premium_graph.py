@@ -136,6 +136,40 @@ def test_run_build_premium_react_composes_scaffold_shell_and_views(monkeypatch):
     assert "lucide-react" in deps and "recharts" in deps
 
 
+def test_assemble_baked_scaffold_wins_over_llm_reemission(monkeypatch):
+    """Regression: if the shell/view coder re-emits a scaffold file (e.g. its own
+    /ui/index.js that drops the barrel, or a partial /styles.css), the FROZEN
+    baked version must win — otherwise the barrel imports vanish and the preview
+    fails with "Could not find module './ui'". Scaffold is overlaid LAST."""
+    from agent.premium_scaffold import PREMIUM_SCAFFOLD_FILES
+
+    plan, arch = _plan(1), _architecture(1)
+
+    # A hostile shell that RE-EMITS /ui/index.js and /styles.css (which it must not).
+    hostile_shell = (
+        "=== FILE: /data/mock.js ===\n"
+        "export const rows1 = [];\n"
+        "=== FILE: /App.js ===\n"
+        'import { Sidebar } from "./ui"; export default function App(){ return <div/>; }\n'
+        "=== FILE: /ui/index.js ===\n"
+        "export const Toast = () => null; // LLM re-emission that drops the barrel\n"
+        "=== FILE: /styles.css ===\n"
+        "body{}\n"
+    )
+    _install_fakes(monkeypatch, plan, arch, hostile_shell, _default_view_raw)
+
+    files = g.run_build("x", premium=True, framework="react")["files"]
+
+    # The baked barrel + styles win, not the LLM re-emission.
+    assert files["/ui/index.js"] == PREMIUM_SCAFFOLD_FILES["/ui/index.js"]
+    assert "export { default as Card }" in files["/ui/index.js"]
+    assert "LLM re-emission" not in files["/ui/index.js"]
+    assert files["/styles.css"] == PREMIUM_SCAFFOLD_FILES["/styles.css"]
+    # All 12 baked primitives are present (nothing dropped).
+    for path in PREMIUM_SCAFFOLD_FILES:
+        assert path in files, f"baked scaffold dropped: {path}"
+
+
 def test_two_views_run_through_executor(monkeypatch):
     plan, arch = _plan(2), _architecture(2)
     structured, stream = _install_fakes(monkeypatch, plan, arch, _SHELL_RAW,

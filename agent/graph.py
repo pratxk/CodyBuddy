@@ -345,9 +345,13 @@ def _validate_and_repair(files: dict[str, str], view_specs) -> dict[str, str]:
 def _assemble_node(emitter):
     def node(state: dict) -> dict:
         plan: PremiumPlan = state["plan"]
-        # ponytail: baked scaffold FIRST, then shell, then views — later keys win on overlap,
-        # but the coder is told not to re-emit scaffold files so overlap should be none.
-        merged = {**PREMIUM_SCAFFOLD_FILES, **state["shell_files"], **state["view_files"]}
+        # ponytail: shell + views FIRST, then the baked scaffold LAST so it ALWAYS wins.
+        # The coder is instructed not to re-emit scaffold files, but LLMs sometimes do anyway
+        # (e.g. a hand-rolled /ui/index.js that drops the barrel, or a partial /styles.css) —
+        # letting the coder win there deletes primitive files the barrel needs and produces
+        # "Could not find module './ui'" in the preview. Overlaying PREMIUM_SCAFFOLD_FILES last
+        # makes the baked 12-primitive kit + styles + lib un-clobberable, LLM-independently.
+        merged = {**state["shell_files"], **state["view_files"], **PREMIUM_SCAFFOLD_FILES}
         files = normalize_files(merged, "react")
         files = ensure_dependencies(files)  # backfill lucide-react/recharts (idempotent)
         files = _validate_and_repair(files, state["architecture"].view_specs)
