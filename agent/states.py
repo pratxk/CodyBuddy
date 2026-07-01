@@ -109,6 +109,21 @@ class PremiumViewSpec(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class PremiumArchitecture(BaseModel):
+    """The premium architect's output: one build spec per view plus the shared
+    /data/mock.js schema every view and the shell agree on."""
+    view_specs: list[PremiumViewSpec] = Field(
+        default_factory=list,
+        description="One PremiumViewSpec per workflow step, in dependency order",
+    )
+    mock_schema: str = Field(
+        default="",
+        description="The shared /data/mock.js schema (keys + types) shell + views agree on",
+    )
+
+    model_config = ConfigDict(extra="ignore")
+
+
 class IntakeStep(BaseModel):
     """One turn of the self-gating intake loop.
 

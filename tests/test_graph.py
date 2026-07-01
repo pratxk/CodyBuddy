@@ -55,10 +55,13 @@ def test_run_build_returns_sandpack_files_no_disk(tmp_path, monkeypatch):
 
 
 def test_run_build_premium_uses_higher_budget_and_premium_prompt(monkeypatch):
-    plan = Plan(name="SocialDash", description="saas", techStack=["React"],
-                features=["dashboard"], files=[File(path="/App.js", purpose="root")])
+    # ponytail: premium REACT now routes to the multi-pass premium subgraph (see
+    # test_premium_graph.py). The premium single-call path (higher budget + premium prompt)
+    # is exercised by premium NON-react builds, which still use the standard linear graph.
+    plan = Plan(name="SocialDash", description="saas", techStack=["Next.js"],
+                features=["dashboard"], files=[File(path="/app/page.tsx", purpose="root")])
     task_plan = TaskPlan(implementation_steps=[
-        ImplementationTask(filepath="/App.js", task_description="app shell"),
+        ImplementationTask(filepath="/app/page.tsx", task_description="app shell"),
     ])
     captured = {}
 
@@ -68,13 +71,13 @@ def test_run_build_premium_uses_higher_budget_and_premium_prompt(monkeypatch):
     def fake_chat_stream(prompt, **kw):
         captured["max_tokens"] = kw.get("max_tokens")
         captured["premium_prompt"] = "PREMIUM PRODUCTION-GRADE MODE" in prompt
-        return "=== FILE: /App.js ===\nexport default function App(){return <h1>Dash</h1>;}\n"
+        return "=== FILE: /app/page.tsx ===\nexport default function Page(){return <h1>Dash</h1>;}\n"
 
     monkeypatch.setattr(g, "chat_structured", fake_structured)
     monkeypatch.setattr(g, "chat_stream", fake_chat_stream)
 
-    result = g.run_build("social media dashboard", premium=True)
-    assert result["files"]["/App.js"]
+    result = g.run_build("social media dashboard", premium=True, framework="nextjs")
+    assert result["files"]["/app/page.tsx"]
     assert captured["max_tokens"] == 20000
     assert captured["premium_prompt"] is True
 
