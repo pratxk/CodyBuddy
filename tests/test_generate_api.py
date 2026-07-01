@@ -134,3 +134,62 @@ def test_generate_threads_framework_into_result(monkeypatch):
     result = next(e for e in events if e.get("type") == "result")
     assert result["framework"] == "static"
     assert captured["framework"] == "static"
+
+
+# ── Phase 5: premium threads end-to-end into run_build (SUPER_ADMIN only) ─────
+# The multi-pass premium subgraph is selected inside run_build when premium=True
+# AND framework=="react"; here we prove the API threads the SERVER-RESOLVED
+# premium flag (SUPER_ADMIN gate) all the way into run_build.
+
+from types import SimpleNamespace as _SNS
+
+from auth.dependencies import get_current_user as _gcu
+
+
+def _override_role(role):
+    from api.main import app as _app
+    user = _SNS(id=uuid.uuid4(), email="u@x.com", name="U", role=role)
+    _app.dependency_overrides[_gcu] = lambda: user
+
+
+def _run_and_capture_premium(monkeypatch, requested_premium, framework="react"):
+    captured = {}
+
+    def fake_run_build(brief, emitter=None, premium=False, framework="react"):
+        captured["premium"] = premium
+        captured["framework"] = framework
+        plan = type("Plan", (), {"name": "PremiumApp"})()
+        return {"plan": plan, "files": {"/App.js": "x", "/ui/index.js": "y"}, "framework": framework}
+
+    monkeypatch.setattr("api.generate.run_build", fake_run_build)
+    monkeypatch.setattr("api.generate._persist_project", lambda *a, **k: None)
+
+    body = {"brief": "a loan origination dashboard", "premium": requested_premium, "framework": framework}
+    start = client.post("/api/generate/start", json=body)
+    assert start.status_code == 200, start.text
+    job_id = start.json()["job_id"]
+    # Drain the SSE so the background job actually runs to completion.
+    client.get(f"/api/generate/events/{job_id}")
+    return captured
+
+
+def test_premium_threads_into_run_build_for_super_admin(monkeypatch):
+    _override_role("SUPER_ADMIN")
+    try:
+        captured = _run_and_capture_premium(monkeypatch, requested_premium=True, framework="react")
+        assert captured["premium"] is True
+        assert captured["framework"] == "react"
+    finally:
+        from api.main import app as _app
+        _app.dependency_overrides.pop(_gcu, None)
+
+
+def test_premium_downgraded_to_standard_for_non_admin(monkeypatch):
+    _override_role("user")
+    try:
+        captured = _run_and_capture_premium(monkeypatch, requested_premium=True, framework="react")
+        # Non-admin asking for premium → run_build receives premium=False (standard path).
+        assert captured["premium"] is False
+    finally:
+        from api.main import app as _app
+        _app.dependency_overrides.pop(_gcu, None)
