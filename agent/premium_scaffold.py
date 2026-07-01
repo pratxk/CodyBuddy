@@ -33,13 +33,23 @@ _STYLES_CSS = """\
   --primary-strong: #ea6407;
   --primary-soft: rgba(249, 115, 22, 0.14);
   --success: #14b8a6;
+  --success-strong: #0d9488;
   --success-soft: rgba(20, 184, 166, 0.14);
+  --success-border: rgba(20, 184, 166, 0.3);
   --warning: #f59e0b;
+  --warning-strong: #d97706;
   --warning-soft: rgba(245, 158, 11, 0.14);
+  --warning-border: rgba(245, 158, 11, 0.3);
   --danger: #f43f5e;
+  --danger-strong: #e11d48;
   --danger-soft: rgba(244, 63, 94, 0.14);
+  --danger-border: rgba(244, 63, 94, 0.3);
+  --danger-border-strong: rgba(244, 63, 94, 0.4);
+  --danger-bg-hover: rgba(244, 63, 94, 0.22);
   --info: #38bdf8;
   --info-soft: rgba(56, 189, 248, 0.14);
+  --info-border: rgba(56, 189, 248, 0.3);
+  --primary-border: rgba(249, 115, 22, 0.35);
 
   /* text */
   --text: #e2e8f0;
@@ -214,7 +224,7 @@ button { font-family: inherit; }
 .sidebar-item.active {
   background: var(--primary-soft);
   color: var(--text-strong);
-  border-color: rgba(249, 115, 22, 0.35);
+  border-color: var(--primary-border);
 }
 .sidebar-item.active .sidebar-step {
   background: var(--primary);
@@ -384,11 +394,11 @@ button { font-family: inherit; }
 }
 .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .badge.neutral { color: var(--muted); background: var(--surface-2); border-color: var(--border); }
-.badge.pending { color: var(--warning); background: var(--warning-soft); border-color: rgba(245, 158, 11, 0.3); }
-.badge.in-progress { color: var(--info); background: var(--info-soft); border-color: rgba(56, 189, 248, 0.3); }
-.badge.approved, .badge.success { color: var(--success); background: var(--success-soft); border-color: rgba(20, 184, 166, 0.3); }
-.badge.rejected, .badge.danger { color: var(--danger); background: var(--danger-soft); border-color: rgba(244, 63, 94, 0.3); }
-.badge.warning { color: var(--warning); background: var(--warning-soft); border-color: rgba(245, 158, 11, 0.3); }
+.badge.pending { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-border); }
+.badge.in-progress { color: var(--info); background: var(--info-soft); border-color: var(--info-border); }
+.badge.approved, .badge.success { color: var(--success); background: var(--success-soft); border-color: var(--success-border); }
+.badge.rejected, .badge.danger { color: var(--danger); background: var(--danger-soft); border-color: var(--danger-border); }
+.badge.warning { color: var(--warning); background: var(--warning-soft); border-color: var(--warning-border); }
 
 /* ── Button ────────────────────────────────────────────────── */
 .btn {
@@ -411,8 +421,8 @@ button { font-family: inherit; }
 .btn-primary:hover:not(:disabled) { filter: brightness(1.06); }
 .btn-ghost { background: transparent; color: var(--text); border-color: var(--border-strong); }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--muted-2); }
-.btn-danger { background: var(--danger-soft); color: var(--danger); border-color: rgba(244, 63, 94, 0.4); }
-.btn-danger:hover:not(:disabled) { background: rgba(244, 63, 94, 0.22); }
+.btn-danger { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-border-strong); }
+.btn-danger:hover:not(:disabled) { background: var(--danger-bg-hover); }
 .btn-sm { padding: 5px var(--space-3); font-size: 12px; }
 .btn-icon { padding: var(--space-2); }
 
@@ -471,9 +481,9 @@ button { font-family: inherit; }
 .progress-value { font-size: 12.5px; color: var(--text-strong); font-weight: 650; }
 .progress-track { height: 8px; background: var(--surface-2); border-radius: var(--radius-pill); overflow: hidden; border: 1px solid var(--border); }
 .progress-fill { height: 100%; border-radius: var(--radius-pill); background: linear-gradient(90deg, var(--primary), var(--primary-strong)); transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1); }
-.progress-fill.success { background: linear-gradient(90deg, var(--success), #0d9488); }
-.progress-fill.warning { background: linear-gradient(90deg, var(--warning), #d97706); }
-.progress-fill.danger { background: linear-gradient(90deg, var(--danger), #e11d48); }
+.progress-fill.success { background: linear-gradient(90deg, var(--success), var(--success-strong)); }
+.progress-fill.warning { background: linear-gradient(90deg, var(--warning), var(--warning-strong)); }
+.progress-fill.danger { background: linear-gradient(90deg, var(--danger), var(--danger-strong)); }
 
 /* ── Modal ─────────────────────────────────────────────────── */
 .modal-overlay {
@@ -663,6 +673,7 @@ export default function Button({
 
 # ── /ui/KPIStat.js ──────────────────────────────────────────────────────────
 _UI_KPISTAT = """\
+import { useId } from "react";
 import { ArrowUpRight, ArrowDownRight, Minus } from "lucide-react";
 import { ResponsiveContainer, AreaChart, Area } from "recharts";
 import { classNames } from "../lib/format";
@@ -673,6 +684,7 @@ import { classNames } from "../lib/format";
 //   trend ("up"|"down"|"flat"), icon (lucide element), note (string),
 //   spark (number[] — renders a token-colored area sparkline)
 export default function KPIStat({ label, value, delta, trend = "flat", icon = null, note, spark }) {
+  const gradId = useId();
   const TrendIcon = trend === "up" ? ArrowUpRight : trend === "down" ? ArrowDownRight : Minus;
   const sparkData = Array.isArray(spark) ? spark.map((v, i) => ({ i, v })) : null;
   return (
@@ -694,7 +706,7 @@ export default function KPIStat({ label, value, delta, trend = "flat", icon = nu
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={sparkData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
               <defs>
-                <linearGradient id="kpiSpark" x1="0" y1="0" x2="0" y2="1">
+                <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--primary)" stopOpacity={0.35} />
                   <stop offset="100%" stopColor="var(--primary)" stopOpacity={0} />
                 </linearGradient>
@@ -704,7 +716,7 @@ export default function KPIStat({ label, value, delta, trend = "flat", icon = nu
                 dataKey="v"
                 stroke="var(--primary)"
                 strokeWidth={2}
-                fill="url(#kpiSpark)"
+                fill={`url(#${gradId})`}
                 isAnimationActive={false}
               />
             </AreaChart>
@@ -737,7 +749,7 @@ export default function DataTable({
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState({ key: null, dir: "asc" });
 
-  const keys = searchKeys || columns.map((c) => c.key);
+  const keys = useMemo(() => searchKeys || columns.map((c) => c.key), [searchKeys, columns]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
