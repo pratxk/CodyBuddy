@@ -1,3 +1,5 @@
+from agent.premium_scaffold import premium_primitives_cheatsheet
+
 DESIGN_GUIDELINES = """DESIGN REQUIREMENTS (non-negotiable — the app must look modern and polished, not bare HTML):
 - ALWAYS include a /styles.css file and import it once at the top of /App.js: import "./styles.css";
 - Define CSS custom properties (variables) at :root for the full color token set:
@@ -564,3 +566,224 @@ to the cards. Want me to animate the chart next?"
 Files to emit (all of them, in dependency order): {file_list}
 
 Use EXACTLY the delimiter format above (one REPLY block, then each file). No other text outside the delimiters."""
+
+
+# ── Premium dashboard prompts (Phase 2) ───────────────────────────────────────
+# Specialized prompts that drive the multi-pass premium subgraph (Phase 3) to
+# compose the baked primitive kit (agent.premium_scaffold) into a real dark-theme
+# CRM/HRMS/ERP-grade workflow dashboard. The STANDARD prompt functions above are
+# left byte-for-byte unchanged — a regression snapshot test proves it.
+
+PREMIUM_DASHBOARD_GUIDELINES = """PREMIUM BUSINESS-DASHBOARD MODE (must look like a real shipped CRM/HRMS/ERP workflow tool — the bar is Linear/Vercel/Stripe density, not a demo):
+
+THEME (dark, fixed structure, per-app palette via CSS vars — DO NOT restyle the primitives):
+- Background is slate-950 (#020617); surfaces #0f172a; borders #1e293b — the baked /styles.css already sets these.
+- Primary/action = orange #F97316; success = teal #14b8a6; warning = amber #f59e0b; danger = red.
+- ALL colors come from the baked /styles.css tokens — reference var(--primary), var(--success), etc.,
+  NEVER a raw hex literal in a view. Re-theming happens ONLY by overriding :root vars, never by
+  restyling a primitive's classes.
+- Dark-theme discipline: keep body text at >=4.5:1 contrast and secondary/muted text at >=3:1;
+  borders/dividers must stay visible on dark surfaces (that is what the tokens already guarantee).
+
+INFORMATION HIERARCHY (how a real operator reads the screen):
+- Establish hierarchy with SIZE, SPACING and CONTRAST — not color alone. One primary CTA per view;
+  secondary actions are visually subordinate (ghost buttons).
+- Top of each view: a row of KPI cards (the headline numbers). Below: the working surface
+  (a DataTable and/or charts). Group related things; use generous, consistent whitespace on the
+  4px/8px spacing rhythm the tokens define.
+- Use tabular figures for every numeric column, KPI value, money and count (the .tnum class /
+  font-variant-numeric already does this) so numbers don't jitter.
+
+SHELL (provided by the baked scaffold — COMPOSE it, never rebuild it):
+- A left SIDEBAR lists the ordered WORKFLOW STEPS; clicking one switches the active view via a
+  single `activeView` useState in /App.js. NO router, NO react-router — plain state switching.
+- A Topbar shows the brand, the current-step title, a search box, and a user avatar/menu.
+- The active step is highlighted in the sidebar (the <Sidebar> primitive already does this via activeId).
+
+EVERY VIEW MUST INCLUDE (as relevant to that step):
+- A row of KPI/stat cards (<KPIStat>) with value + label + delta/trend arrow (up/down colored from tokens).
+- A <DataTable> with realistic columns, its built-in search + sortable headers working, and status
+  <Badge>s (Pending / In Progress / Approved / Rejected / etc.) colored from tokens. Status is conveyed
+  by badge TEXT + color together, never color alone. The table's empty state must be handled.
+- A <ProgressBar> wherever a step has completion/percentage semantics (onboarding %, funding %, SLA).
+- FUNCTIONAL buttons (<Button>): clicking does something REAL — opens a <Modal>, fires a useToast()
+  toast, or MUTATES shared state (e.g. approve/reject moves a row's status and the KPIs recompute).
+  Never a dead button. Destructive actions use the danger variant and sit apart from the primary CTA.
+
+DATA (realism is non-negotiable):
+- ALL seed data lives in /data/mock.js and tells ONE coherent story that FLOWS ACROSS STEPS
+  (an entity approved in step 2 shows up as "approved" in step 4). Dozens of rows, weeks of points —
+  never 3 dummy rows.
+- Use recharts for any trend/breakdown (area/line for trend, bar/pie for breakdown), each wrapped in
+  <ResponsiveContainer>, fed from the mock data, with legend + tooltip and a sensible empty state.
+
+Compose the baked primitives from ../ui; NEVER hand-roll a card / table / badge / button / modal /
+toast / progress bar that a primitive already covers. Keep each view file focused — one screen per file."""
+
+
+def premium_planner_prompt(user_prompt: str) -> str:
+    """Premium PLANNER prompt — drives a `PremiumPlan` (via chat_structured).
+
+    The model designs the DOMAIN of a real dark-theme business workflow tool:
+    app name, palette overrides, the ordered WORKFLOW STEPS (= sidebar views),
+    the entities, and the cross-step mock-data story.
+    """
+    return f"""You are the PREMIUM PLANNER scoping a real business WORKFLOW tool — a dark-theme
+CRM/HRMS/ERP-grade dashboard (think loan origination, employee onboarding, procurement approval,
+claims processing, sales pipeline). It runs in a CodeSandbox Sandpack "react" sandbox and COMPOSES a
+pre-baked dark primitive kit (Card, KPIStat, DataTable, Badge, Button, Sidebar, Topbar, Tabs,
+ProgressBar, Modal, Toast) — you do NOT design components, you design the WORKFLOW and its data.
+
+User's request: {user_prompt}
+
+{PREMIUM_DASHBOARD_GUIDELINES}
+
+YOUR JOB — produce a PremiumPlan:
+- Decompose the request into 4-6 sequential WORKFLOW STEPS a real operator moves an entity through
+  (e.g. Intake -> Underwriting -> Approval -> Funding -> Servicing). Each step is ONE sidebar view.
+  Respect a ~6-view cap — pick the highest-value steps, never pad.
+- For EACH step (view) specify: a stable `id` slug, a `label`, a lucide `icon` name (e.g. "Users",
+  "FileText", "CheckCircle", "TrendingUp"), a one-line `purpose`, the `kpis` (headline metric labels),
+  the `table_columns` for that step's DataTable, and the `actions` (button actions like "approve",
+  "reject", "open-modal", "export").
+- Design the domain `entities` (name + field list) — the nouns the workflow moves.
+- Choose a `palette` of CSS-var overrides for the app's accent (e.g. {{"--primary": "#F97316"}});
+  keep the dark structure, only tune the accent(s). Leave it empty to keep the default orange.
+- Write a `mock_data_spec`: prose describing the ONE coherent cross-step story the /data/mock.js seed
+  data must tell (an entity approved in step 2 appears as "approved" in step 4), including rough row
+  counts and the status lifecycle.
+
+Emit ONLY the structured object — fields: name, palette, entities, views (each with id, label, icon,
+purpose, kpis, table_columns, actions), mock_data_spec. No prose outside the structure."""
+
+
+def premium_architect_prompt(plan_json: str) -> str:
+    """Premium ARCHITECT prompt — drives ONE `PremiumViewSpec` per view plus the
+    shared /data/mock.js schema, so the shell and every view agree on data shape.
+    """
+    return f"""You are the PREMIUM ARCHITECT. Turn the plan into ordered, self-contained build specs —
+one PremiumViewSpec per workflow step — plus the shared /data/mock.js schema that every view and the
+shell must agree on. The app COMPOSES the baked dark primitive kit; you specify exactly how.
+
+{PREMIUM_DASHBOARD_GUIDELINES}
+
+For EACH view emit a PremiumViewSpec:
+- `view_id` (matches the plan's view id) and `filepath` (e.g. "/views/Underwriting.js").
+- `task_description`: precisely what to build — exactly which primitives to compose, the KPIs (label +
+  what they measure), the DataTable columns + a SAMPLE ROW SHAPE, the status Badges/statuses used, the
+  ProgressBar (if any), and EACH button's action wired to a real effect (toast / modal / state mutation —
+  say which). Name the recharts chart(s) and their data source when a trend/breakdown belongs here.
+- `primitives`: the baked primitives this view composes, e.g. ["KPIStat","DataTable","Badge","Button","Modal"].
+- `data_keys`: the exact /data/mock.js keys this view reads.
+
+Also define the shared /data/mock.js SCHEMA — every top-level key with its TYPE and the per-row field
+shape (so shell + views agree). ORDER the shell + mock-data step FIRST; the views depend on them, so
+they come after. Keep every spec self-contained (a coder building one view needs nothing but its spec,
+the primitive cheatsheet, and the data keys).
+
+Project plan (JSON):
+{plan_json}
+
+Emit ONLY the structured steps (the per-view PremiumViewSpec list). No prose outside the structure."""
+
+
+# The premium coder output contract reuses the existing "=== FILE: /path ===" delimiter.
+_PREMIUM_FILE_CONTRACT = (
+    "Output in this EXACT format — no prose before/after, no markdown fences around the "
+    "delimiter lines:\n\n"
+    "=== FILE: /path/one.js ===\n(full file body here)\n"
+    "=== FILE: /path/two.js ===\n(full file body here)\n\n"
+    "Use EXACTLY the `=== FILE: /path ===` delimiter for each file. No other text outside the delimiters."
+)
+
+
+def coder_shell_prompt(plan_json: str, mock_schema: str) -> str:
+    """Premium SHELL coder prompt — generates /App.js + /data/mock.js ONLY.
+
+    Injects the primitive cheatsheet so the shell wires the baked kit correctly and
+    the realistic seed data agrees with the architect's schema.
+    """
+    return f"""You are the PREMIUM SHELL CODER. Generate EXACTLY TWO files and nothing else:
+/App.js and /data/mock.js. The baked primitive kit (/ui/*), /styles.css and /lib/format.js already
+EXIST in the project — do NOT emit or redefine them.
+
+{PREMIUM_DASHBOARD_GUIDELINES}
+
+/App.js MUST:
+- import "./styles.css" and import the primitives from "./ui"
+  (e.g. import {{ Sidebar, Topbar, ToastHost }} from "./ui";), and import the seed data from "./data/mock".
+- hold a single `activeView` useState (the current workflow step) — NO router, NO react-router.
+- own the SHARED app state (the entity rows/statuses the views read and mutate) and pass it + setters
+  down to each view; render <ToastHost /> ONCE at the app root.
+- render <Sidebar> (the ordered workflow steps, activeId={{activeView}}, onSelect=setActiveView),
+  <Topbar> (brand + current-step title + search + avatar), and the ACTIVE /views/* component.
+- Reference each /views/<View> by import; those view files are generated separately — import them by path.
+
+/data/mock.js MUST export the realistic cross-step seed data per the schema below — dozens of rows /
+weeks of points telling ONE coherent story that flows across the steps.
+
+Mock-data schema (keys + types the views agree on):
+{mock_schema}
+
+{premium_primitives_cheatsheet()}
+
+Project plan (JSON):
+{plan_json}
+
+{_PREMIUM_FILE_CONTRACT}
+
+Emit ONLY /data/mock.js and /App.js (data before the shell that consumes it)."""
+
+
+def coder_view_prompt(view_spec_json: str, data_keys: list[str], palette: dict) -> str:
+    """Premium VIEW coder prompt — generates ONE /views/<View>.js.
+
+    Input is kept SMALL on purpose: the primitive cheatsheet + only the view's spec,
+    its data KEYS (never the full mock-data dump) and the palette tokens.
+    """
+    keys_text = ", ".join(data_keys) if data_keys else "(none)"
+    palette_text = (
+        "\n".join(f"  {k}: {v}" for k, v in palette.items()) if palette else "  (default orange accent)"
+    )
+    return f"""You are the PREMIUM VIEW CODER. Generate EXACTLY ONE file: the /views/<View>.js in the
+spec below — and nothing else. The baked primitive kit (/ui/*), /styles.css, /lib/format.js and
+/data/mock.js already EXIST — do NOT emit or redefine them; import what you need.
+
+{PREMIUM_DASHBOARD_GUIDELINES}
+
+THIS VIEW:
+- Import the primitives you compose from "../ui" (e.g. import {{ Card, KPIStat, DataTable, Badge,
+  Button, Modal, useToast }} from "../ui";) and the data from "../data/mock".
+- Compose EXACTLY the KPIs / DataTable / Badges / ProgressBar / buttons the spec lists — nothing
+  hand-rolled. Buttons must ACTUALLY work: open a <Modal>, fire a useToast() toast, or mutate the
+  shared state passed in as props. Never a dead button.
+- Read ONLY these mock-data keys (they exist in /data/mock.js — do NOT invent new data shapes):
+  {keys_text}
+- Colors come from these palette tokens (all via var(--...), never raw hex):
+{palette_text}
+
+View spec (JSON):
+{view_spec_json}
+
+{premium_primitives_cheatsheet()}
+
+{_PREMIUM_FILE_CONTRACT}
+
+Emit ONLY the single /views/<View>.js file named in the spec."""
+
+
+def premium_coder_system_prompt() -> str:
+    """Premium coder SYSTEM prompt = the react CODER_SYSTEM_PROMPT + kit-composition rules."""
+    return (
+        CODER_SYSTEM_PROMPT
+        + " "
+        + (
+            "PREMIUM KIT MODE: You are composing a PRE-BUILT dark-theme primitive kit. Import the "
+            "primitives from \"../ui\" (or \"./ui\" from /App.js) and the seed data from \"../data/mock\" "
+            "(or \"./data/mock\" from /App.js); the kit, /styles.css and /lib/format.js ALREADY EXIST — "
+            "NEVER redefine or re-emit a primitive, a style file, or the data module. Render ONLY "
+            "primitive/data FIELDS as JSX children (e.g. {row.status}, never {row}). Every handler and "
+            "prop the JSX references MUST be defined; no missing imports, no orphan references. All "
+            "colors come from the /styles.css CSS-var tokens — never a raw hex literal in a view."
+        )
+    )
