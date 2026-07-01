@@ -36,6 +36,79 @@ class TaskPlan(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class Entity(BaseModel):
+    """A domain entity in the dashboard's data model."""
+    name: str = Field(description="The entity name (e.g. 'Client', 'LoanApplication')")
+    fields: list[str] = Field(
+        default_factory=list,
+        description="Column/attribute names for this entity",
+    )
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class PremiumView(BaseModel):
+    """One workflow step = one sidebar item = one generated view."""
+    id: str = Field(description="Stable slug, e.g. 'client-onboarding'")
+    label: str = Field(description="Sidebar label for this step")
+    icon: str = Field(description="Lucide icon name, e.g. 'Users'")
+    purpose: str = Field(description="One-line description of what this step does")
+    kpis: list[str] = Field(
+        default_factory=list,
+        description="KPI labels for this view",
+    )
+    table_columns: list[str] = Field(
+        default_factory=list,
+        description="Data-table columns for this view",
+    )
+    actions: list[str] = Field(
+        default_factory=list,
+        description="Button actions, e.g. 'approve', 'reject', 'open-modal'",
+    )
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class PremiumPlan(BaseModel):
+    """The premium planner's output — extends the domain design."""
+    name: str = Field(description="The app name")
+    palette: dict[str, str] = Field(
+        default_factory=dict,
+        description="CSS-var overrides, e.g. {'--primary': '#F97316'}",
+    )
+    entities: list[Entity] = Field(
+        default_factory=list,
+        description="Domain entities in the dashboard's data model",
+    )
+    views: list[PremiumView] = Field(
+        default_factory=list,
+        description="Ordered workflow steps (= sidebar views)",
+    )
+    mock_data_spec: str = Field(
+        default="",
+        description="Prose describing the cross-step story the mock data must tell",
+    )
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class PremiumViewSpec(BaseModel):
+    """The premium architect's per-view build spec."""
+    view_id: str = Field(description="Matches a PremiumView.id")
+    filepath: str = Field(description="e.g. '/views/ClientOnboarding.js'")
+    task_description: str = Field(description="What to build in this view")
+    primitives: list[str] = Field(
+        default_factory=list,
+        description="Baked primitives to compose, e.g. ['KPIStat','DataTable','Badge','Button']",
+    )
+    data_keys: list[str] = Field(
+        default_factory=list,
+        description="Mock-data keys this view reads",
+    )
+
+    model_config = ConfigDict(extra="ignore")
+
+
 class IntakeStep(BaseModel):
     """One turn of the self-gating intake loop.
 
