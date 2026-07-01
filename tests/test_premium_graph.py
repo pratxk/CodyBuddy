@@ -34,12 +34,24 @@ class _FakeEmitter:
     def __init__(self):
         self.chunks = []
         self.events = []
+        self.topologies = []
+        self.agent_starts = []
+        self.agent_ends = []
     def graph_init(self):
         self.events.append("graph_init")
+    def graph_update(self, topology):
+        self.events.append("graph_update")
+        self.topologies.append(topology)
     def start_next(self):
         self.events.append("start_next")
     def end_current(self, **kw):
         self.events.append("end_current")
+    def start_agent(self, agent_id):
+        self.events.append(f"start_agent:{agent_id}")
+        self.agent_starts.append(agent_id)
+    def end_agent(self, agent_id, **kw):
+        self.events.append(f"end_agent:{agent_id}")
+        self.agent_ends.append(agent_id)
     def chunk(self, text):
         self.chunks.append(text)
 
@@ -253,3 +265,61 @@ def test_regression_standard_react_uses_standard_graph(monkeypatch):
     result = g.run_build("a plain react app", premium=False, framework="react")
     assert premium_called["planner"] == 0   # standard path, no premium nodes
     assert "/App.js" in result["files"]
+
+
+# ── Phase 4 minors ───────────────────────────────────────────────────────────
+
+def test_shell_orphan_import_triggers_repair(monkeypatch):
+    """Minor #1 — if /App.js imports a /views/<X>.js that the view worker returned {} for,
+    _validate_and_repair detects the orphan shell import and runs exactly one targeted repair;
+    the build returns without crashing and the view file is present."""
+    plan, arch = _plan(1), _architecture(1)
+
+    # Shell references Step1.js, but the view worker will return {} for it.
+    shell_with_orphan_import = (
+        "=== FILE: /data/mock.js ===\n"
+        "export const rows1 = [];\n"
+        "=== FILE: /App.js ===\n"
+        "import Step1 from \"./views/Step1.js\";\n"
+        "import { Sidebar, Topbar, ToastHost } from \"./ui\";\n"
+        "export default function App(){ return <div />; }\n"
+    )
+
+    def empty_view(_prompt):
+        # Simulate a view worker that returns {} (empty parse / exception path).
+        return ""  # parse_multi_file_response returns {} on empty string
+
+    _install_fakes(monkeypatch, plan, arch, shell_with_orphan_import, empty_view)
+
+    repair_calls = []
+
+    def fake_chat(prompt, **kw):
+        repair_calls.append(prompt)
+        return (
+            "=== FILE: /views/Step1.js ===\n"
+            "export default function View(){ return null; }\n"
+        )
+
+    monkeypatch.setattr(g, "chat", fake_chat)
+
+    result = g.run_build("x", premium=True, framework="react")
+
+    # Exactly one repair call for the orphan shell import
+    assert len(repair_calls) == 1
+    # Build did not crash and the view file was filled in
+    assert "/views/Step1.js" in result["files"]
+
+
+def test_ui_import_re_matches_multiline(monkeypatch):
+    """Minor #2 — _UI_IMPORT_RE with re.DOTALL matches a multi-line import statement."""
+    multiline_import = (
+        'import {\n'
+        '  Card,\n'
+        '  DataTable\n'
+        '} from "../ui";\n'
+    )
+    match = g._UI_IMPORT_RE.search(multiline_import)
+    assert match is not None, "_UI_IMPORT_RE must match multi-line import { ... } from '../ui'"
+    names = [n.strip() for n in match.group(1).split(",") if n.strip()]
+    assert "Card" in names
+    assert "DataTable" in names

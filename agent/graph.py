@@ -1,3 +1,4 @@
+import atexit
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -5,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 
+from agent.events import build_premium_topology
 from agent.llm import (CODER_CHAIN, CODER_CHAIN_PREMIUM, PLANNER_CHAIN, chat,
                        chat_stream, chat_structured, strip_code_fences)
 from agent.premium_scaffold import PREMIUM_SCAFFOLD_FILES
@@ -91,14 +93,20 @@ def build_graph(emitter=None, premium=False, framework="react"):
 def run_build(user_prompt: str, emitter=None, premium: bool = False,
               framework: str = "react") -> dict:
     framework = coerce_framework(framework)
-    if emitter:
-        emitter.graph_init(); emitter.start_next()
     # ponytail: premium react → the multi-pass dashboard subgraph (shell + parallel views +
     # assemble/validate). Everything else (standard, or premium static/nextjs) → the existing
     # linear graph, byte-for-byte, so the standard path is untouched.
     if premium and framework == "react":
+        if emitter:
+            # Emit a minimal 3-node skeleton topology immediately so the FE has something to
+            # show while the planner runs.  The planner node will call graph_update() with the
+            # real per-view topology once it knows the view list.
+            emitter.graph_init()
+            emitter.start_agent("planner")
         result = build_premium_graph(emitter).invoke({"user_prompt": user_prompt})
     else:
+        if emitter:
+            emitter.graph_init(); emitter.start_next()
         # ponytail: premium + framework are baked into the node closures (prompt + budget + shape).
         result = build_graph(emitter, premium, framework).invoke({"user_prompt": user_prompt})
     return {"plan": result["plan"], "files": result["files"], "framework": framework}
@@ -114,7 +122,9 @@ MAX_PREMIUM_VIEWS = 6
 
 # ponytail: views are independent → fan out on a small module-level pool (concurrency cap 3).
 # Each call falls through CODER_CHAIN_PREMIUM on its own; 3 keeps us inside per-minute limits.
+# atexit ensures the pool's worker threads are released on interpreter shutdown / test reload.
 _VIEW_POOL = ThreadPoolExecutor(max_workers=3, thread_name_prefix="premium-view")
+atexit.register(_VIEW_POOL.shutdown, wait=False)
 
 # The primitives the baked /ui barrel actually exports — the coherence validator flags any
 # named import from ../ui outside this set as an orphan (drift = runtime crash).
@@ -123,7 +133,10 @@ _UI_EXPORTS: frozenset[str] = frozenset({
     "Tabs", "ProgressBar", "Modal", "Toast", "ToastHost", "useToast",
 })
 
-_UI_IMPORT_RE = re.compile(r"""import\s*\{([^}]*)\}\s*from\s*['"](?:\.\.?/)*ui['"]""")
+_UI_IMPORT_RE = re.compile(
+    r"""import\s*\{([^}]*)\}\s*from\s*['"](?:\.\.?/)*ui['"]""",
+    re.DOTALL,
+)
 _VIEW_IMPORT_RE = re.compile(r"""from\s*['"]((?:\.\.?/)*views/[^'"]+)['"]""")
 
 
@@ -137,7 +150,13 @@ def _premium_planner_node(emitter):
         if len(plan.views) > MAX_PREMIUM_VIEWS:
             plan = plan.model_copy(update={"views": plan.views[:MAX_PREMIUM_VIEWS]})
         if emitter:
-            emitter.end_current(ok=True); emitter.start_next()
+            # Publish the DYNAMIC per-view topology now that we know the view list.
+            # The FE replaces its graph skeleton with the real nodes (planner → architect →
+            # shell → view:<id1> … view:<idN> → assemble) and resets in-progress tracking.
+            premium_topology = build_premium_topology(plan)
+            emitter.graph_update(premium_topology)
+            emitter.end_agent("planner", ok=True)
+            emitter.start_agent("architect")
         return {"plan": plan}
     return node
 
@@ -152,7 +171,8 @@ def _premium_architect_node(emitter):
         if len(arch.view_specs) > len(plan.views):
             arch = arch.model_copy(update={"view_specs": arch.view_specs[:len(plan.views)]})
         if emitter:
-            emitter.end_current(ok=True); emitter.start_next()
+            emitter.end_agent("architect", ok=True)
+            emitter.start_agent("shell")
         return {"plan": plan, "architecture": arch, "plan_json": plan.model_dump_json()}
     return node
 
@@ -168,7 +188,11 @@ def _coder_shell_node(emitter):
         for path in shell_files:
             logger.info("Shell coder: wrote %s (%d chars)", path, len(shell_files[path]))
         if emitter:
-            emitter.end_current(ok=True); emitter.start_next()
+            plan: PremiumPlan = state["plan"]
+            emitter.end_agent("shell", ok=True)
+            # Start the first view agent if there are any views; assemble starts after all views.
+            if plan.views:
+                emitter.start_agent(f"view:{plan.views[0].id}")
         return {**state, "shell_files": shell_files}
     return node
 
@@ -192,15 +216,27 @@ def _coder_views_node(emitter):
         specs = state["architecture"].view_specs
         on_delta = emitter.chunk if emitter else None
         # ponytail: fan out the N view calls in parallel (cap 3) — cuts latency vs sequential.
-        results = list(_VIEW_POOL.map(
-            lambda s: _coder_view_node(s, plan.palette, on_delta), specs))
+        # Lifecycle events (start/end per view) are emitted on the MAIN THREAD after each
+        # future completes, keeping ordering clean and avoiding concurrent emitter writes.
+        # The first view's start was already emitted by _coder_shell_node; here we handle
+        # end-of-current + start-of-next as results are collected in submission order.
+        futures = [_VIEW_POOL.submit(_coder_view_node, s, plan.palette, on_delta) for s in specs]
         view_files: dict[str, str] = {}
-        for files in results:
+        for idx, (spec, fut) in enumerate(zip(specs, futures)):
+            view_id = f"view:{spec.view_id}"
+            files = fut.result()  # blocks until this view is done
             view_files.update(files)
+            if emitter:
+                emitter.end_agent(view_id, ok=True)
+                # Start the next view (or assemble after the last view)
+                next_idx = idx + 1
+                if next_idx < len(specs):
+                    next_view_id = f"view:{specs[next_idx].view_id}"
+                    emitter.start_agent(next_view_id)
+                else:
+                    emitter.start_agent("assemble")
         for path in view_files:
             logger.info("View coder: wrote %s (%d chars)", path, len(view_files[path]))
-        if emitter:
-            emitter.end_current(ok=True); emitter.start_next()
         return {**state, "view_files": view_files}
     return node
 
@@ -251,9 +287,43 @@ def _repair_view(path: str, content: str, error: str) -> str | None:
 
 def _validate_and_repair(files: dict[str, str], view_specs) -> dict[str, str]:
     """Scan each generated view for coherence issues; on failure do ONE targeted repair call.
-    If the repair still doesn't resolve it, keep the original (best available) and log — the
+    Also validates /App.js for orphan view imports (views that are missing or empty).
+    If a repair still doesn't resolve it, keep the original (best available) and log — the
     build never crashes on a coherence miss."""
     out = dict(files)
+
+    # Minor #1 — validate /App.js shell for orphan view imports.
+    # If /App.js imports a /views/<X>.js that is missing or empty (view worker returned {}),
+    # log it and run ONE targeted repair for that view file.
+    shell_content = out.get("/App.js")
+    if shell_content:
+        for match in _VIEW_IMPORT_RE.finditer(shell_content):
+            src = match.group(1)
+            tail = src.split("views/", 1)[1]
+            target = "/views/" + (tail if tail.endswith(".js") else tail + ".js")
+            if not out.get(target):  # missing or empty
+                logger.warning(
+                    "Shell /App.js imports '%s' which is missing/empty — attempting repair",
+                    target,
+                )
+                # Find the matching view spec so we can produce a repaired stub
+                spec = next((s for s in view_specs if _norm_path(s.filepath) == target), None)
+                placeholder = (
+                    f"=== FILE: {target} ===\n"
+                    f"// empty — generated by view worker\n"
+                    f"export default function View(){{ return null; }}\n"
+                )
+                repaired = _repair_view(
+                    target,
+                    out.get(target, placeholder),
+                    f"missing or empty view imported by /App.js: {target}",
+                )
+                if repaired:
+                    out[target] = repaired
+                    logger.info("Shell orphan repair filled %s", target)
+                else:
+                    logger.warning("Shell orphan repair for %s failed — leaving empty", target)
+
     for spec in view_specs:
         path = _norm_path(spec.filepath)
         content = out.get(path)
@@ -284,7 +354,7 @@ def _assemble_node(emitter):
         for path in files:
             logger.info("Assembled: %s (%d chars)", path, len(files[path]) if isinstance(files[path], str) else 0)
         if emitter:
-            emitter.end_current(ok=True)
+            emitter.end_agent("assemble", ok=True)
         return {"plan": plan, "files": files}
     return node
 

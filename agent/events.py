@@ -2,7 +2,10 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from agent.states import PremiumPlan
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,43 @@ BUILD_TOPOLOGY: dict = {
         {"from": "architect", "to": "coder"},
     ],
 }
+
+
+def build_premium_topology(plan: "PremiumPlan") -> dict:
+    """Build the dynamic premium topology from a PremiumPlan.
+
+    Returns a topology dict with one node per pipeline stage:
+      planner → architect → shell → view:<id1> … view:<idN> → assemble
+
+    Each view node uses the PremiumView's label and icon so the FE sidebar
+    shows the real view names rather than generic placeholders.
+
+    This function is pure (no side-effects) and safe to call from any thread.
+    """
+    nodes: list[dict] = [
+        {"id": "planner",   "label": "Planner",   "sublabel": "Designs the view plan",    "icon": "ClipboardList"},
+        {"id": "architect", "label": "Architect", "sublabel": "Specifies every view",      "icon": "Network"},
+        {"id": "shell",     "label": "Shell",     "sublabel": "Builds app shell + data",   "icon": "Layout"},
+    ]
+    for view in plan.views:
+        nodes.append({
+            "id": f"view:{view.id}",
+            "label": view.label,
+            "sublabel": view.purpose,
+            "icon": view.icon,
+        })
+    nodes.append({
+        "id": "assemble",
+        "label": "Assemble",
+        "sublabel": "Merges + validates all files",
+        "icon": "PackageCheck",
+    })
+
+    edges: list[dict] = []
+    for i in range(len(nodes) - 1):
+        edges.append({"from": nodes[i]["id"], "to": nodes[i + 1]["id"]})
+
+    return {"nodes": nodes, "edges": edges}
 
 
 class AgentEventEmitter:
@@ -62,6 +102,30 @@ class AgentEventEmitter:
     def graph_init(self) -> None:
         """Emit the full topology so the FE can render the graph skeleton immediately."""
         self._push(type="graph_init", topology=self._topology)
+
+    def graph_update(self, topology: dict) -> None:
+        """Re-publish the topology mid-run (e.g. after the planner reveals N views).
+
+        Emits a ``graph_update`` event with the same payload shape as ``graph_init``
+        so the FE can replace the graph skeleton with the real per-view node list.
+        The FE should treat this identically to a late ``graph_init``—re-render the
+        graph with the new nodes/edges and reset any in-progress state it tracks
+        by node id (the node ids in the new topology supersede any previously seen).
+
+        Event shape (SSE data field, JSON-encoded):
+            {
+              "type": "graph_update",
+              "topology": {
+                "nodes": [{"id": str, "label": str, "sublabel": str, "icon": str}, ...],
+                "edges": [{"from": str, "to": str}, ...]
+              }
+            }
+
+        This call is thread-safe (routes through run_coroutine_threadsafe).
+        """
+        self._topology = topology
+        self._nodes = topology["nodes"]
+        self._push(type="graph_update", topology=topology)
 
     def chunk(self, text: str) -> None:
         """Push a live coder output delta so the FE can show files being written in real time."""
