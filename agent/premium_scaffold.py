@@ -151,13 +151,29 @@ button { font-family: inherit; }
 }
 
 /* ── App shell ─────────────────────────────────────────────── */
+/* Correct dashboard layout: a pinned Topbar ROW on top, then a
+   [sidebar | scrollable-main] ROW that fills the rest of the viewport.
+   Only .app-main scrolls; the topbar and sidebar stay put. */
 .app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+.app-shell-topbar { flex: none; z-index: 30; }
+.app-shell-body {
+  flex: 1;
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
-  min-height: 100vh;
-  min-height: 100dvh;
+  min-height: 0;
 }
-.app-main { display: flex; flex-direction: column; min-width: 0; }
+.app-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-y: auto;
+}
 .app-content {
   padding: var(--space-6);
   display: flex;
@@ -179,10 +195,8 @@ button { font-family: inherit; }
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  height: 100dvh;
+  height: 100%;
+  min-height: 0;
   overflow-y: auto;
 }
 .sidebar-brand {
@@ -255,9 +269,6 @@ button { font-family: inherit; }
   border-bottom: 1px solid var(--border);
   background: rgba(15, 23, 42, 0.72);
   backdrop-filter: blur(10px);
-  position: sticky;
-  top: 0;
-  z-index: 20;
 }
 .topbar-titles { display: flex; flex-direction: column; min-width: 0; }
 .topbar-eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted-2); }
@@ -331,6 +342,25 @@ button { font-family: inherit; }
 .kpi-delta.flat { color: var(--muted); }
 .kpi-delta-note { color: var(--muted-2); font-weight: 500; }
 .kpi-spark { position: absolute; right: 0; bottom: 0; left: 0; height: 42px; opacity: 0.9; }
+
+/* ── ChartCard / chart containment ─────────────────────────── */
+/* A hard-bounded frame so recharts (which grows to fill its parent) can never
+   expand unbounded and blow out the page. width:100% + a fixed height set
+   inline by <ChartCard>; the min-height:0 lets ResponsiveContainer shrink. */
+.chart-frame {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+/* Backstop: bound the recharts container even if a chart is placed outside a
+   ChartCard, so a missing/auto height can't stretch the layout. */
+.recharts-responsive-container {
+  width: 100% !important;
+  max-width: 100%;
+  min-width: 0;
+  max-height: 420px;
+}
 
 /* ── DataTable ─────────────────────────────────────────────── */
 .dt { display: flex; flex-direction: column; }
@@ -518,9 +548,11 @@ button { font-family: inherit; }
 
 /* ── Responsive ────────────────────────────────────────────── */
 @media (max-width: 860px) {
-  .app-shell { grid-template-columns: 1fr; }
+  .app-shell { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
+  .app-shell-body { grid-template-columns: 1fr; }
+  .app-main { overflow-y: visible; }
   .sidebar {
-    position: static; height: auto;
+    height: auto; overflow-y: visible;
     flex-direction: row; flex-wrap: wrap; align-items: center;
     border-right: none; border-bottom: 1px solid var(--border);
   }
@@ -863,14 +895,47 @@ export default function DataTable({
 }
 """
 
+# ── /ui/icon.js ─────────────────────────────────────────────────────────────
+# Robust lucide-icon resolver. Accepts EITHER a rendered lucide element
+# (<Users/>) OR a STRING NAME ("Users"). A string is looked up in the full
+# lucide-react namespace and rendered; unknown names fall back to a default
+# glyph — the raw string is NEVER rendered as text (that was the sidebar bug).
+_UI_ICON = """\
+import { createElement, isValidElement } from "react";
+import * as LucideIcons from "lucide-react";
+
+const FALLBACK = LucideIcons.Circle;
+
+// resolveIcon(icon, size?) -> a rendered lucide element (or null when icon is
+// falsy). `icon` may be a lucide element, a component, or a name string like
+// "Users" / "file-text" / "trending-up" (case/kebab tolerant).
+export function resolveIcon(icon, size = 16) {
+  if (icon == null || icon === false) return null;
+  if (isValidElement(icon)) return icon;
+  if (typeof icon === "function") return createElement(icon, { size });
+  if (typeof icon === "string") {
+    const pascal = icon
+      .trim()
+      .replace(/[-_\\s]+(.)?/g, (_, c) => (c ? c.toUpperCase() : ""))
+      .replace(/^(.)/, (_, c) => c.toUpperCase());
+    const Ico = LucideIcons[icon] || LucideIcons[pascal] || FALLBACK;
+    return createElement(Ico, { size });
+  }
+  return createElement(FALLBACK, { size });
+}
+"""
+
 # ── /ui/Sidebar.js ──────────────────────────────────────────────────────────
 _UI_SIDEBAR = """\
 import { classNames } from "../lib/format";
+import { resolveIcon } from "./icon";
 
 // Vertical workflow-step navigation.
 // props:
 //   brand (string), brandSub (string), heading (string),
-//   items: [{ id, label, icon?(lucide element) }],
+//   items: [{ id, label, icon? }]  — icon may be a lucide element OR a lucide
+//     NAME STRING ("Users", "FileText", "trending-up"); it is resolved to a real
+//     icon and NEVER rendered as raw text,
 //   activeId, onSelect(id), footer (node)
 export default function Sidebar({
   brand = "Workflow",
@@ -892,19 +957,22 @@ export default function Sidebar({
       </div>
       {heading && <div className="sidebar-heading">{heading}</div>}
       <nav className="sidebar-nav">
-        {items.map((item, index) => (
-          <button
-            key={item.id}
-            type="button"
-            className={classNames("sidebar-item", { active: item.id === activeId })}
-            aria-current={item.id === activeId ? "page" : undefined}
-            onClick={() => onSelect && onSelect(item.id)}
-          >
-            <span className="sidebar-step">{index + 1}</span>
-            {item.icon && <span className="sidebar-item-icon">{item.icon}</span>}
-            <span className="sidebar-item-label">{item.label}</span>
-          </button>
-        ))}
+        {items.map((item, index) => {
+          const icon = resolveIcon(item.icon, 16);
+          return (
+            <button
+              key={item.id}
+              type="button"
+              className={classNames("sidebar-item", { active: item.id === activeId })}
+              aria-current={item.id === activeId ? "page" : undefined}
+              onClick={() => onSelect && onSelect(item.id)}
+            >
+              <span className="sidebar-step">{index + 1}</span>
+              {icon && <span className="sidebar-item-icon">{icon}</span>}
+              <span className="sidebar-item-label">{item.label}</span>
+            </button>
+          );
+        })}
       </nav>
       {footer && <div className="sidebar-footer">{footer}</div>}
     </aside>
@@ -1154,9 +1222,69 @@ export default function Modal({ open, onClose, title, children, footer }) {
 }
 """
 
+# ── /ui/AppShell.js ─────────────────────────────────────────────────────────
+# The CORRECT dashboard layout, baked so the coder can't get it wrong:
+#   ┌───────────────── Topbar (pinned, full width) ─────────────────┐
+#   ├──────────┬────────────────────────────────────────────────────┤
+#   │ Sidebar  │  scrollable main content (children)                 │
+#   └──────────┴────────────────────────────────────────────────────┘
+# The topbar is ALWAYS on top; the sidebar is a fixed-width left column; only the
+# main area scrolls. Compose it in /App.js — never hand-roll this layout.
+_UI_APPSHELL = """\
+// Full-height app layout: fixed Topbar on top, Sidebar on the left, scrollable
+// main content on the right. Pass rendered elements as props/children.
+//   <AppShell topbar={<Topbar .../>} sidebar={<Sidebar .../>}>
+//     {activeViewContent}
+//   </AppShell>
+export default function AppShell({ topbar, sidebar, children }) {
+  return (
+    <div className="app-shell">
+      {topbar && <div className="app-shell-topbar">{topbar}</div>}
+      <div className="app-shell-body">
+        {sidebar}
+        <main className="app-main">
+          <div className="app-content">{children}</div>
+        </main>
+      </div>
+    </div>
+  );
+}
+"""
+
+# ── /ui/ChartCard.js ────────────────────────────────────────────────────────
+# Card wrapper that gives recharts a FIXED, bounded height so a chart can never
+# expand unbounded and blow out the layout. Put a single <ResponsiveContainer
+# width="100%" height="100%"> (or any recharts element) as the child.
+_UI_CHARTCARD = """\
+import Card from "./Card";
+
+// Chart container with a hard height cap. Wrap ANY recharts chart in this so it
+// stays contained. Give the chart <ResponsiveContainer width="100%" height="100%">;
+// the fixed-height wrapper here bounds it. props: title, subtitle, actions,
+// height (px, default 280), className, children.
+export default function ChartCard({
+  title,
+  subtitle,
+  actions,
+  height = 280,
+  className,
+  children,
+}) {
+  return (
+    <Card title={title} subtitle={subtitle} actions={actions} className={className}>
+      <div className="chart-frame" style={{ height }}>
+        {children}
+      </div>
+    </Card>
+  );
+}
+"""
+
 # ── /ui/index.js (barrel) ───────────────────────────────────────────────────
 _UI_INDEX = """\
+export { default as AppShell } from "./AppShell";
 export { default as Card } from "./Card";
+export { default as ChartCard } from "./ChartCard";
 export { default as KPIStat } from "./KPIStat";
 export { default as DataTable } from "./DataTable";
 export { default as Badge } from "./Badge";
@@ -1167,6 +1295,7 @@ export { default as Tabs } from "./Tabs";
 export { default as ProgressBar } from "./ProgressBar";
 export { default as Modal } from "./Modal";
 export { default as Toast, ToastHost, useToast } from "./Toast";
+export { resolveIcon } from "./icon";
 """
 
 # ── /package.json ───────────────────────────────────────────────────────────
@@ -1187,6 +1316,9 @@ _PACKAGE_JSON = """\
 PREMIUM_SCAFFOLD_FILES: dict[str, str] = {
     "/styles.css": _STYLES_CSS,
     "/lib/format.js": _LIB_FORMAT,
+    "/ui/icon.js": _UI_ICON,
+    "/ui/AppShell.js": _UI_APPSHELL,
+    "/ui/ChartCard.js": _UI_CHARTCARD,
     "/ui/Card.js": _UI_CARD,
     "/ui/KPIStat.js": _UI_KPISTAT,
     "/ui/DataTable.js": _UI_DATATABLE,
@@ -1207,12 +1339,23 @@ _CHEATSHEET = """\
 PREMIUM PRIMITIVE KIT — import from "../ui" (data from "../data/mock", styles auto-loaded).
 NEVER redefine these; compose them. All colors come from /styles.css tokens (var(--...)).
 
-import { Card, KPIStat, DataTable, Badge, Button, Sidebar, Topbar, Tabs,
-         ProgressBar, Modal, ToastHost, useToast } from "../ui";
+import { AppShell, Card, ChartCard, KPIStat, DataTable, Badge, Button, Sidebar,
+         Topbar, Tabs, ProgressBar, Modal, ToastHost, useToast } from "../ui";
+
+AppShell  (LAYOUT — use in /App.js so the topbar is ALWAYS on top, sidebar left, main scrolls)
+  props: topbar?:node, sidebar?:node, children
+  <AppShell topbar={<Topbar .../>} sidebar={<Sidebar .../>}>{activeViewContent}</AppShell>
 
 Card
   props: title?:string, subtitle?:string, actions?:node, flush?:bool, className?:string, children
   <Card title="Applications" subtitle="This week" actions={<Button size="sm">Export</Button>}>...</Card>
+
+ChartCard  (ALWAYS wrap a recharts chart in this — it bounds the height so charts never overflow)
+  props: title?:string, subtitle?:string, actions?:node, height?:number=280, className?:string, children
+  give the chart <ResponsiveContainer width="100%" height="100%">…</ResponsiveContainer>
+  <ChartCard title="Volume" height={280}>
+    <ResponsiveContainer width="100%" height="100%"><AreaChart data={rows}>…</AreaChart></ResponsiveContainer>
+  </ChartCard>
 
 KPIStat
   props: label:string (req), value:string|number (req), delta?:string, trend?:"up"|"down"|"flat",
@@ -1237,7 +1380,9 @@ Button
 Sidebar
   props: brand?:string, brandSub?:string, heading?:string,
          items:[{id,label,icon?}] (req), activeId (req), onSelect(id) (req), footer?:node
-  <Sidebar brand="LoanFlow" items={steps} activeId={view} onSelect={setView} />
+    icon accepts a LUCIDE NAME STRING ("Users","FileText","TrendingUp") OR a lucide element —
+    a string is resolved to the real icon (never rendered as text). Pass the plan's icon string directly.
+  <Sidebar brand="LoanFlow" items={[{id:"intake",label:"Intake",icon:"Users"}]} activeId={view} onSelect={setView} />
 
 Topbar
   props: eyebrow?:string, title?:string, search?:bool=true, searchValue?:string,

@@ -7,7 +7,9 @@ from agent.scaffold import ensure_dependencies, is_sandpack_shaped
 # The exact §2.1 file list the scaffold must ship.
 REQUIRED_PATHS = (
     "/styles.css",
+    "/ui/AppShell.js",
     "/ui/Card.js",
+    "/ui/ChartCard.js",
     "/ui/KPIStat.js",
     "/ui/DataTable.js",
     "/ui/Badge.js",
@@ -18,12 +20,15 @@ REQUIRED_PATHS = (
     "/ui/Toast.js",
     "/ui/ProgressBar.js",
     "/ui/Modal.js",
+    "/ui/icon.js",
     "/ui/index.js",
     "/lib/format.js",
 )
 
 PRIMITIVE_NAMES = (
+    "AppShell",
     "Card",
+    "ChartCard",
     "KPIStat",
     "DataTable",
     "Badge",
@@ -105,3 +110,43 @@ def test_styles_has_reset_animation_and_responsive_block():
     assert "focus-visible" in css
     assert "@media" in css
     assert "::-webkit-scrollbar" in css
+
+
+def test_sidebar_resolves_icon_name_strings():
+    # Sidebar must resolve icon NAME STRINGS (the coder passes item.icon:"Users")
+    # via the lucide namespace and never render the raw string as text.
+    icon = ps.PREMIUM_SCAFFOLD_FILES["/ui/icon.js"]
+    assert 'import * as LucideIcons from "lucide-react"' in icon
+    assert "resolveIcon" in icon
+    assert "LucideIcons[" in icon  # dynamic name lookup
+    sidebar = ps.PREMIUM_SCAFFOLD_FILES["/ui/Sidebar.js"]
+    assert "resolveIcon" in sidebar  # sidebar uses the resolver, not {item.icon}
+    barrel = ps.PREMIUM_SCAFFOLD_FILES["/ui/index.js"]
+    assert "resolveIcon" in barrel
+
+
+def test_appshell_lays_out_topbar_on_top():
+    shell = ps.PREMIUM_SCAFFOLD_FILES["/ui/AppShell.js"]
+    assert "topbar" in shell and "sidebar" in shell and "children" in shell
+    css = ps.PREMIUM_SCAFFOLD_FILES["/styles.css"]
+    # Shell stacks a topbar row on top of a [sidebar | main] body row.
+    assert ".app-shell-topbar" in css
+    assert ".app-shell-body" in css
+    assert ".app-main" in css
+
+
+def test_chartcard_bounds_recharts_height():
+    chart = ps.PREMIUM_SCAFFOLD_FILES["/ui/ChartCard.js"]
+    assert "height" in chart and "chart-frame" in chart
+    css = ps.PREMIUM_SCAFFOLD_FILES["/styles.css"]
+    assert ".chart-frame" in css
+    # Backstop so any recharts container is height-bounded.
+    assert ".recharts-responsive-container" in css
+
+
+def test_cheatsheet_mentions_appshell_chartcard_and_icon_string():
+    sheet = ps.premium_primitives_cheatsheet()
+    assert "AppShell" in sheet
+    assert "ChartCard" in sheet
+    # icon may be a lucide NAME STRING (documented for the coder)
+    assert "NAME STRING" in sheet or "name string" in sheet.lower()
