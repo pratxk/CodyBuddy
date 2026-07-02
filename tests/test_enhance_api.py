@@ -139,3 +139,60 @@ def test_enhance_premium_honored_for_super_admin():
     kwargs = chat_mock.call_args.kwargs
     assert kwargs["max_tokens"] == 20000
     assert kwargs["chain"] is CODER_CHAIN_PREMIUM
+
+
+def test_enhance_preserves_premium_scaffold():
+    """Refining a premium app (has /ui/index.js) must never drop/clobber the
+    baked /ui kit even when the enhance LLM only re-emits a file or two."""
+    from agent.premium_scaffold import PREMIUM_SCAFFOLD_FILES
+
+    premium_files = {
+        **PREMIUM_SCAFFOLD_FILES,
+        "/App.js": 'import { Sidebar } from "./ui"; export default function App(){return null;}',
+        "/data/mock.js": "export const rows = [];\n",
+        "/views/Home.js": 'import { Card } from "../ui"; export default () => <Card/>;',
+    }
+    # LLM returns a reply + only /App.js + a BROKEN /ui/index.js (drops primitives).
+    llm_out = (
+        "=== REPLY ===\nMade the header bolder.\n"
+        "=== FILE: /App.js ===\n"
+        'import { Sidebar } from "./ui"; export default function App(){return <main/>;}\n'
+        "=== FILE: /ui/index.js ===\n"
+        "export const Toast = () => null; // destructive re-emission\n"
+    )
+    session = _mock_db_session()
+    with (
+        patch("api.enhance.chat", return_value=llm_out),
+        patch("api.enhance.SessionLocal", return_value=session),
+    ):
+        r = client.post(
+            "/api/enhance",
+            json={"files": premium_files, "instruction": "make the header bolder"},
+        )
+    assert r.status_code == 200, r.text
+    out = r.json()["files"]
+    # Every baked /ui primitive + /lib survives, and the barrel is the FROZEN one.
+    for path in PREMIUM_SCAFFOLD_FILES:
+        if path.startswith(("/ui/", "/lib/")):
+            assert path in out, f"frozen kit file dropped: {path}"
+    assert out["/ui/index.js"] == PREMIUM_SCAFFOLD_FILES["/ui/index.js"]
+    assert "destructive re-emission" not in out["/ui/index.js"]
+    # Un-returned generated files preserved; the LLM's /App.js edit applied.
+    assert "/data/mock.js" in out and "/views/Home.js" in out
+    assert "<main/>" in out["/App.js"]
+
+
+def test_enhance_non_premium_unaffected():
+    """A plain (non-premium) app must NOT get the scaffold overlaid."""
+    session = _mock_db_session()
+    with (
+        patch("api.enhance.chat", return_value=_LLM_WITH_REPLY),
+        patch("api.enhance.SessionLocal", return_value=session),
+    ):
+        r = client.post(
+            "/api/enhance",
+            json={"files": _SAMPLE_FILES, "instruction": "tweak it"},
+        )
+    assert r.status_code == 200, r.text
+    out = r.json()["files"]
+    assert "/ui/index.js" not in out  # no scaffold injected into a plain app

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from agent.llm import VISION_CHAIN, chat_vision
+from agent.premium_scaffold import is_premium_shaped, preserve_premium_scaffold
 from agent.prompts import CODER_SYSTEM_PROMPT, uxmaster_prompt
 from agent.scaffold import (detect_framework, normalize_files,
                            parse_uxmaster_response)
@@ -66,6 +67,9 @@ def uxmaster(
     reply, needs_verification, parsed = parse_uxmaster_response(raw, strip_code_fences)
     reply = reply or "Reviewed your screenshot and refined the UI."
     updated_files = normalize_files(parsed, detect_framework(req.files))
+    # ponytail: same premium-safety as enhance — never drop/clobber the baked /ui kit.
+    if is_premium_shaped(req.files):
+        updated_files = preserve_premium_scaffold(req.files, updated_files)
 
     label = instruction or "screenshot review"
     project_id = _upsert_project(req.project_id, current_user.id, f"UX Master: {label}", updated_files)

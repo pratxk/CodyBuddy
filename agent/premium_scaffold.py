@@ -1268,3 +1268,33 @@ def premium_primitives_cheatsheet() -> str:
     coder composes the primitives correctly (drift here = runtime crashes downstream).
     """
     return _CHEATSHEET
+
+
+# ── Premium-safety helpers (shared by enhance / uxmaster / oncall) ────────────
+# The baked /ui kit + /lib helpers are IMPORT-CRITICAL: /App.js and every view do
+# `import { ... } from "../ui"` / `"./ui"`, so if a refine or auto-repair LLM call
+# omits or malforms them the whole app dies with "Could not find module './ui'".
+# These helpers keep those frozen while still allowing the LLM to change the
+# refinable surface (/styles.css, /App.js, /views/*, /data/mock.js, /package.json).
+_FROZEN_PREFIXES = ("/ui/", "/lib/")
+
+
+def is_premium_shaped(files: dict) -> bool:
+    """A premium dashboard is identifiable by the baked barrel."""
+    return "/ui/index.js" in (files or {})
+
+
+def preserve_premium_scaffold(original: dict, updated: dict) -> dict:
+    """Make an LLM refine/repair safe for a premium app.
+
+    Layer the LLM's changes over the ORIGINAL files (so nothing the LLM silently
+    dropped is lost), then re-overlay the FROZEN import-critical kit (/ui/*,
+    /lib/*) from the baked scaffold LAST so the barrel + primitives can never be
+    clobbered. The refinable surface (styles, App, views, mock data, package.json)
+    stays whatever the LLM produced, so refines still take effect.
+    """
+    merged = {**original, **updated}
+    for path, code in PREMIUM_SCAFFOLD_FILES.items():
+        if path.startswith(_FROZEN_PREFIXES):
+            merged[path] = code
+    return merged

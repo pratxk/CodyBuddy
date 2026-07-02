@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from agent.llm import CODER_CHAIN, CODER_CHAIN_PREMIUM, chat, strip_code_fences
+from agent.premium_scaffold import is_premium_shaped, preserve_premium_scaffold
 from agent.prompts import CODER_SYSTEM_PROMPT, vibe_prompt
 from agent.scaffold import (detect_framework, normalize_files,
                            parse_reply_and_files)
@@ -63,6 +64,10 @@ def enhance(
     # ponytail: infer framework from the incoming files so static/next apps aren't React-normalized.
     # The vibe prompt itself stays React-worded for this pass (acceptable per spec).
     updated_files = normalize_files(parsed, detect_framework(req.files))
+    # ponytail: refining a PREMIUM app must never drop/clobber the baked /ui kit
+    # (the LLM won't reliably re-emit 12 primitives + the barrel → "./ui" breaks).
+    if is_premium_shaped(req.files):
+        updated_files = preserve_premium_scaffold(req.files, updated_files)
 
     project_id = _upsert_project(req.project_id, current_user.id, req.instruction, updated_files)
     return EnhanceResponse(project_id=project_id, files=updated_files, reply=reply)
