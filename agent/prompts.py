@@ -595,8 +595,15 @@ INFORMATION HIERARCHY (how a real operator reads the screen):
   font-variant-numeric already does this) so numbers don't jitter.
 
 SHELL (provided by the baked scaffold — COMPOSE it, never rebuild it):
+- /App.js composes the baked <AppShell topbar={...} sidebar={...}>{activeView}</AppShell> — NEVER
+  hand-roll the topbar+sidebar+main layout. AppShell pins the Topbar ON TOP, puts the Sidebar in a
+  fixed left column, and scrolls only the main area (this is what keeps the header from rendering
+  below the content).
 - A left SIDEBAR lists the ordered WORKFLOW STEPS; clicking one switches the active view via a
   single `activeView` useState in /App.js. NO router, NO react-router — plain state switching.
+  Sidebar items are {{ id, label, icon }} where `icon` is a lucide NAME STRING (e.g. "Users",
+  "FileText") — the Sidebar resolves the string to a real icon, so pass it straight through and
+  never render the name as text.
 - A Topbar shows the brand, the current-step title, a search box, and a user avatar/menu.
 - The active step is highlighted in the sidebar (the <Sidebar> primitive already does this via activeId).
 
@@ -614,8 +621,11 @@ DATA (realism is non-negotiable):
 - ALL seed data lives in /data/mock.js and tells ONE coherent story that FLOWS ACROSS STEPS
   (an entity approved in step 2 shows up as "approved" in step 4). Dozens of rows, weeks of points —
   never 3 dummy rows.
-- Use recharts for any trend/breakdown (area/line for trend, bar/pie for breakdown), each wrapped in
-  <ResponsiveContainer>, fed from the mock data, with legend + tooltip and a sensible empty state.
+- Use recharts for any trend/breakdown (area/line for trend, bar/pie for breakdown). ALWAYS put each
+  chart inside the baked <ChartCard> (which gives it a FIXED bounded height) with a
+  <ResponsiveContainer width="100%" height="100%"> inside — never place a bare recharts chart in a plain
+  div (it expands unbounded and blows out the layout). Feed it from the mock data, with legend +
+  tooltip and a sensible empty state.
 
 Compose the baked primitives from ../ui; NEVER hand-roll a card / table / badge / button / modal /
 toast / progress bar that a primitive already covers. Keep each view file focused — one screen per file."""
@@ -711,12 +721,25 @@ EXIST in the project — do NOT emit or redefine them.
 
 /App.js MUST:
 - import "./styles.css" and import the primitives from "./ui"
-  (e.g. import {{ Sidebar, Topbar, ToastHost }} from "./ui";), and import the seed data from "./data/mock".
+  (e.g. import {{ AppShell, Sidebar, Topbar, ToastHost }} from "./ui";), and import the seed data from "./data/mock".
 - hold a single `activeView` useState (the current workflow step) — NO router, NO react-router.
 - own the SHARED app state (the entity rows/statuses the views read and mutate) and pass it + setters
   down to each view; render <ToastHost /> ONCE at the app root.
-- render <Sidebar> (the ordered workflow steps, activeId={{activeView}}, onSelect=setActiveView),
-  <Topbar> (brand + current-step title + search + avatar), and the ACTIVE /views/* component.
+- Compose the layout with the baked <AppShell> — DO NOT hand-roll the shell layout (do not write your
+  own flex/grid wrappers for topbar+sidebar+main). Exactly:
+    <AppShell
+      topbar={{<Topbar eyebrow=... title={{activeStep.label}} user={{{{name:"..."}}}} />}}
+      sidebar={{<Sidebar brand="..." items={{steps}} activeId={{activeView}} onSelect={{setActiveView}} />}}
+    >
+      {{renderActiveView()}}
+    </AppShell>
+  AppShell guarantees the Topbar is pinned ON TOP, the Sidebar is the left column, and only the main
+  area scrolls — so the topbar can never end up below the content.
+- Sidebar `items` come from the plan's views: each item is {{ id, label, icon }} where `icon` is the
+  plan's lucide NAME STRING (e.g. icon: "Users") — pass the string straight through; the Sidebar
+  resolves it to a real icon. Do NOT import lucide icons just for the sidebar and do NOT render names as text.
+- <Topbar> shows the brand/current-step title + search + avatar; render the ACTIVE /views/* component
+  as the AppShell children.
 - Reference each /views/<View> by import; those view files are generated separately — import them by path.
 
 /data/mock.js MUST export the realistic cross-step seed data per the schema below — dozens of rows /
