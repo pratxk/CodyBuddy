@@ -173,3 +173,43 @@ def test_oncall_non_premium_unaffected():
     # No baked primitives leaked into a plain app.
     assert "/ui/Card.js" not in out
     assert "/ui/index.js" not in out or out["/ui/index.js"] != PREMIUM_SCAFFOLD_FILES["/ui/index.js"]
+
+
+def test_oncall_premium_scoped_touches_only_broken_file():
+    """A premium repair must fix ONLY the file the error names — not rewrite the
+    app — and preserve the frozen kit (/ui, /styles.css, /lib) + other views."""
+    from agent.premium_scaffold import PREMIUM_SCAFFOLD_FILES
+    premium = {
+        **PREMIUM_SCAFFOLD_FILES,
+        "/App.js": 'import { AppShell } from "./ui"; export default () => <AppShell/>;',
+        "/data/mock.js": "export const rows = [];\n",
+        "/views/Pipeline.js": 'export const V = () => { const x = [1,2 3]; return null; };',  # syntax error
+        "/views/Other.js": 'export const O = () => null;',
+    }
+    # OnCall returns ONLY the fixed broken file.
+    llm_out = (
+        "=== FILE: /views/Pipeline.js ===\n"
+        'export const V = () => { const x = [1,2,3]; return null; };\n'
+    )
+    session = _mock_db_session()
+    with (
+        patch("api.oncall.chat", return_value=llm_out) as chat_mock,
+        patch("api.enhance.SessionLocal", return_value=session),
+    ):
+        r = client.post("/api/oncall", json={
+            "files": premium,
+            "error": "SyntaxError: /views/Pipeline.js: Unexpected number (1:31)",
+        })
+    assert r.status_code == 200, r.text
+    out = r.json()["files"]
+    # Only the broken file was fixed; everything else is byte-identical.
+    assert "[1,2,3]" in out["/views/Pipeline.js"]
+    assert out["/views/Other.js"] == premium["/views/Other.js"]
+    assert out["/App.js"] == premium["/App.js"]
+    assert out["/data/mock.js"] == premium["/data/mock.js"]
+    assert out["/ui/index.js"] == PREMIUM_SCAFFOLD_FILES["/ui/index.js"]
+    assert out["/styles.css"] == PREMIUM_SCAFFOLD_FILES["/styles.css"]
+    # The prompt sent to the LLM was SCOPED — it did not embed unrelated views.
+    sent = chat_mock.call_args.args[0]
+    assert "/views/Pipeline.js" in sent
+    assert "/views/Other.js" not in sent  # not implicated → not shown

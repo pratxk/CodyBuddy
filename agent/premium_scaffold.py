@@ -1477,14 +1477,16 @@ def preserve_premium_scaffold(original: dict, updated: dict) -> dict:
     """Make an LLM refine/repair safe for a premium app.
 
     Layer the LLM's changes over the ORIGINAL files (so nothing the LLM silently
-    dropped is lost), then re-overlay the FROZEN import-critical kit (/ui/*,
-    /lib/*) from the baked scaffold LAST so the barrel + primitives can never be
-    clobbered, and guarantee the required deps so the kit always resolves. The
-    refinable surface (styles, App, views, mock data) stays whatever the LLM
-    produced, so refines still take effect.
+    dropped is lost), then re-overlay the FROZEN kit — the import-critical /ui/* +
+    /lib/* AND the baked /styles.css (which holds ALL the kit's component styling:
+    app-shell layout, sidebar, cards, tables, badges…). A refine that rewrites
+    /styles.css almost always drops most of it → the whole app loses its styling
+    (the "add dark mode broke the CSS" bug). Freezing it guarantees the app can
+    never lose its look. Refinable surface: /App.js, /views/*, /data/mock.js — and
+    a NEW /overrides.css for any custom styling (App.js imports it after styles.css).
     """
     merged = {**original, **updated}
     for path, code in PREMIUM_SCAFFOLD_FILES.items():
-        if path.startswith(_FROZEN_PREFIXES):
+        if path.startswith(_FROZEN_PREFIXES) or path == "/styles.css":
             merged[path] = code
     return ensure_premium_deps(merged)

@@ -1,20 +1,23 @@
 """
 OnCallAgent endpoint — POST /api/oncall.
 
-Takes the current Sandpack files + a runtime/compile error string and returns
-the complete corrected file set via a single LLM call.
+Auto-repairs a runtime/compile error in the live app.
 
-ponytail: same shape as /api/enhance — reuses vibe machinery, _upsert_project,
-parse + normalize. Only difference: instruction is auto-derived from the error.
+Premium apps get a SURGICAL repair: OnCall sees ONLY the file(s) the error names
+(+ the entry for context) and is told to make the SMALLEST possible fix, emitting
+only the changed file(s) — so one stray comma can't cascade into a full rewrite
+that breaks unrelated code. The frozen kit (/ui, /lib, /styles.css, package.json)
+is never touched. Standard apps keep the whole-file-set repair (they're small).
 """
 import logging
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from agent.llm import CODER_CHAIN, chat, strip_code_fences
-from agent.premium_scaffold import PREMIUM_SCAFFOLD_FILES
-from agent.prompts import CODER_SYSTEM_PROMPT, oncall_prompt
+from agent.premium_scaffold import is_premium_shaped, preserve_premium_scaffold
+from agent.prompts import CODER_SYSTEM_PROMPT, oncall_prompt, oncall_prompt_scoped
 from agent.scaffold import (detect_framework, normalize_files,
                            parse_multi_file_response)
 from api.enhance import _upsert_project
@@ -24,34 +27,25 @@ from db.models import User
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/oncall", tags=["oncall"])
 
-# ponytail: a premium app is recognised by the baked barrel it always ships with.
-_PREMIUM_MARKER = "/ui/index.js"
+# File paths referenced anywhere in an error string (with or without a leading slash).
+_PATH_RE = re.compile(r"/?(?:[\w.-]+/)*[\w.-]+\.(?:jsx?|tsx?|css)")
+# The frozen kit — never sent to / repaired by OnCall.
+_FROZEN = ("/ui/", "/lib/")
 
 
-def _is_premium_shaped(files: dict[str, str]) -> bool:
-    """True when the app carries the baked premium kit (its barrel is present)."""
-    return _PREMIUM_MARKER in files
-
-
-def _preserve_premium_scaffold(
-    original: dict[str, str], fixed: dict[str, str]
-) -> dict[str, str]:
-    """Make an OnCall fix safe for premium apps.
-
-    OnCall regenerates the WHOLE file set via a non-premium LLM call, which will
-    NOT reproduce the 12 baked ``/ui/*`` primitives, ``/lib/format.js`` or
-    ``/data/mock.js`` — dropping them would destroy the app (the barrel would
-    import files that no longer exist → "Could not find module './ui'").
-
-    Fix: layer the LLM's changes over the ORIGINAL files (so nothing the LLM
-    silently omitted is lost), then re-overlay the baked kit LAST so the frozen
-    primitives + styles + format lib can never be clobbered by an LLM re-emission.
-    """
-    # 1) Original files are the floor — the LLM's fix only ADDS/OVERWRITES.
-    merged = {**original, **fixed}
-    # 2) The baked kit always wins — un-clobberable, LLM-independent.
-    merged.update(PREMIUM_SCAFFOLD_FILES)
-    return merged
+def _relevant_files(files: dict[str, str], error: str) -> dict[str, str]:
+    """The editable file(s) implicated by the error — so OnCall fixes ONLY those,
+    not all ~22 files. Matches paths/basenames named in the error against the app's
+    files; always includes the entry (/App.js) for context. Falls back to the whole
+    editable surface (App + views + data, NOT the frozen kit) when nothing matches."""
+    editable = {p: c for p, c in files.items()
+                if not p.startswith(_FROZEN) and p not in ("/styles.css", "/package.json")}
+    named = {m.group(0).lstrip("/") for m in _PATH_RE.finditer(error or "")}
+    hit = {p: c for p, c in editable.items()
+           if p.lstrip("/") in named or p.rsplit("/", 1)[-1] in named}
+    if "/App.js" in editable:
+        hit["/App.js"] = editable["/App.js"]
+    return hit or editable
 
 
 class OnCallRequest(BaseModel):
@@ -76,22 +70,25 @@ def oncall(
     if not req.files:
         raise HTTPException(status_code=400, detail="files must not be empty")
 
-    raw = chat(
-        oncall_prompt(req.files, req.error),
-        chain=CODER_CHAIN,
-        system=CODER_SYSTEM_PROMPT,
-        max_tokens=8192, agent="oncall",
-    )
-    parsed = parse_multi_file_response(raw, strip_code_fences)
-    fixed_files = normalize_files(parsed, detect_framework(req.files))
+    if is_premium_shaped(req.files):
+        # SURGICAL premium repair: show only the implicated file(s), fix minimally,
+        # emit only the changed file(s), then merge over the app + re-freeze the kit.
+        relevant = _relevant_files(req.files, req.error)
+        raw = chat(
+            oncall_prompt_scoped(relevant, req.error),
+            chain=CODER_CHAIN, system=CODER_SYSTEM_PROMPT, max_tokens=8192, agent="oncall",
+        )
+        changed = parse_multi_file_response(raw, strip_code_fences)
+        merged = normalize_files({**req.files, **changed}, "react")
+        fixed_files = preserve_premium_scaffold(req.files, merged)
+    else:
+        raw = chat(
+            oncall_prompt(req.files, req.error),
+            chain=CODER_CHAIN, system=CODER_SYSTEM_PROMPT, max_tokens=8192, agent="oncall",
+        )
+        parsed = parse_multi_file_response(raw, strip_code_fences)
+        fixed_files = normalize_files(parsed, detect_framework(req.files))
 
-    # ponytail: on a premium app, PRESERVE the baked scaffold + any generated files
-    # the LLM didn't reproduce — never let an autofix strip /ui/*, /lib/format.js or
-    # /data/mock.js (that destroys the app). Non-premium apps are unaffected.
-    if _is_premium_shaped(req.files):
-        fixed_files = _preserve_premium_scaffold(req.files, fixed_files)
-
-    # ponytail: brief stored as the error string (truncated) so the project row is meaningful
     brief = f"OnCall fix: {req.error[:120]}"
     project_id = _upsert_project(req.project_id, current_user.id, brief, fixed_files, source="oncall")
     return OnCallResponse(project_id=project_id, files=fixed_files)

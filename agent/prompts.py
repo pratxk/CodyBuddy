@@ -437,7 +437,7 @@ Use EXACTLY the delimiter format above for each file. No other text outside the 
 
 
 def oncall_prompt(files: dict[str, str], error: str) -> str:
-    """Build the OnCallAgent single-call prompt.
+    """Build the OnCallAgent single-call prompt (STANDARD apps).
 
     ponytail: delegates to vibe_prompt so file-embedding + format rules are DRY.
     The instruction is an error-fix directive that asks for root-cause analysis.
@@ -448,6 +448,50 @@ def oncall_prompt(files: dict[str, str], error: str) -> str:
         f"Error:\n{error}"
     )
     return vibe_prompt(files, instruction)
+
+
+def oncall_prompt_scoped(relevant_files: dict[str, str], error: str) -> str:
+    """SURGICAL OnCall prompt for a PREMIUM app.
+
+    A premium app is ~22 files on a FROZEN kit; regenerating the whole thing for one
+    error breaks unrelated code (why "removing one comma → OnCall breaks something
+    else + touches package.json"). Here we send ONLY the file(s) implicated by the
+    error + the primitive cheatsheet, and demand the SMALLEST possible fix, emitting
+    ONLY the changed file(s).
+    """
+    files_text = "\n".join(
+        f"=== FILE: {path} ===\n{content}" for path, content in relevant_files.items()
+    )
+    file_list = ", ".join(relevant_files.keys())
+    return f"""You are ON-CALL, an SRE fixing a RUNTIME/COMPILE ERROR in a PREMIUM React dashboard
+running in Sandpack. The app is built on a FROZEN pre-built primitive kit imported from
+"../ui" / "./ui" — those primitives + /lib/* + /styles.css + /package.json are IMMUTABLE and
+NOT shown; do NOT touch or emit them.
+
+THE ERROR:
+{error}
+
+The primitive kit's API (for reference — compose, never redefine):
+{premium_primitives_cheatsheet()}
+
+The file(s) implicated by the error (fix within these):
+{files_text}
+
+RULES (surgical — this is a REPAIR, not a rewrite):
+- Diagnose the ROOT CAUSE of the error, then make the SMALLEST possible change that fixes it
+  (e.g. a missing comma/bracket/import, an undefined variable, a wrong prop). Preserve ALL other
+  behavior and code — do NOT refactor, restyle, rename, or "improve" anything unrelated.
+- Do NOT touch /ui/*, /lib/*, /styles.css, or /package.json (frozen). Do NOT add/remove npm
+  dependencies. Compose the existing primitives; keep imports coherent with files NOT shown.
+- Emit ONLY the file(s) you actually change. If the fix is one file, emit one file.
+- Every emitted file must be complete and valid.
+
+Output EXACTLY this format — the changed file(s) only, no REPLY block, no prose, no fences:
+
+=== FILE: /views/Whatever.js ===
+(full corrected file body)
+
+(Files you may fix: {file_list}. Emit ONLY the one(s) you changed.)"""
 
 
 def uxmaster_prompt(files: dict[str, str], instruction: str, image_provided: bool = True) -> str:
@@ -603,8 +647,14 @@ RULES:
   actually appends to the relevant data/state on submit with a success useToast() toast).
 - Compose the frozen primitives (Modal, Button, Badge, DataTable, etc.) from "../ui"/"./ui"; NEVER
   redefine them. Colors from CSS tokens var(--...), never raw hex.
-- Emit ONLY the files you CHANGE or CREATE. Do NOT re-emit unchanged files, and NEVER emit any /ui/*
-  or /lib/* file (frozen). Keep imports/refs coherent with the files you don't emit.
+- Make the SMALLEST change that fully delivers the instruction — do NOT refactor, rename, or rewrite
+  unrelated code. Preserve everything not directly part of the request.
+- /ui/*, /lib/*, /styles.css and /package.json are FROZEN — NEVER emit them (a rewritten /styles.css
+  drops the kit's styling and breaks the whole app). For CUSTOM styling create/append a NEW
+  "/overrides.css" (a domain file) and add `import "./overrides.css";` to /App.js AFTER the existing
+  styles import — those rules layer on top without touching the baked kit.
+- Emit ONLY the files you CHANGE or CREATE. Do NOT re-emit unchanged files. Keep imports/refs coherent
+  with the files you don't emit.
 - Every emitted file must be complete and valid.
 
 Output EXACTLY this format — one REPLY block, then ONLY the changed/new files. No prose, no fences:
