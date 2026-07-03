@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from agent.llm import CODER_CHAIN, CODER_CHAIN_PREMIUM, chat, strip_code_fences
 from agent.premium_scaffold import is_premium_shaped, preserve_premium_scaffold
-from agent.prompts import CODER_SYSTEM_PROMPT, vibe_prompt
+from agent.prompts import CODER_SYSTEM_PROMPT, vibe_prompt, vibe_prompt_premium
 from agent.scaffold import (detect_framework, normalize_files,
                            parse_reply_and_files)
 from auth.dependencies import get_current_user
@@ -53,22 +53,31 @@ def enhance(
     # (mirrors api.generate._resolve_premium); a non-admin asking for premium gets standard.
     premium = bool(req.premium) and getattr(current_user, "role", "") == "SUPER_ADMIN"
     chain = CODER_CHAIN_PREMIUM if premium else CODER_CHAIN
-    raw = chat(
-        vibe_prompt(req.files, req.instruction, premium=premium),
-        chain=chain,
-        system=CODER_SYSTEM_PROMPT,
-        max_tokens=20000 if premium else 8192,
-    )
-    # ponytail: ONE call emits both the conversational reply and the files.
-    reply, parsed = parse_reply_and_files(raw, strip_code_fences)
-    reply = reply or "Applied your changes."
-    # ponytail: infer framework from the incoming files so static/next apps aren't React-normalized.
-    # The vibe prompt itself stays React-worded for this pass (acceptable per spec).
-    updated_files = normalize_files(parsed, detect_framework(req.files))
-    # ponytail: refining a PREMIUM app must never drop/clobber the baked /ui kit
-    # (the LLM won't reliably re-emit 12 primitives + the barrel → "./ui" breaks).
+
     if is_premium_shaped(req.files):
-        updated_files = preserve_premium_scaffold(req.files, updated_files)
+        # SCOPED edit: send only the editable surface (not the frozen /ui + /lib kit)
+        # + the primitive cheatsheet, and ask for ONLY the changed files. This keeps
+        # a premium edit fast + reliable instead of re-writing all ~22 files.
+        editable = {p: c for p, c in req.files.items()
+                    if not p.startswith(("/ui/", "/lib/"))}
+        raw = chat(
+            vibe_prompt_premium(editable, req.instruction),
+            chain=chain, system=CODER_SYSTEM_PROMPT, max_tokens=16000,
+        )
+        reply, changed = parse_reply_and_files(raw, strip_code_fences)
+        reply = reply or "Applied your changes."
+        # Merge the partial changes over the current app, then re-freeze the kit + deps.
+        merged = normalize_files({**req.files, **changed}, "react")
+        updated_files = preserve_premium_scaffold(req.files, merged)
+    else:
+        raw = chat(
+            vibe_prompt(req.files, req.instruction, premium=premium),
+            chain=chain, system=CODER_SYSTEM_PROMPT, max_tokens=20000 if premium else 8192,
+        )
+        reply, parsed = parse_reply_and_files(raw, strip_code_fences)
+        reply = reply or "Applied your changes."
+        # ponytail: infer framework so static/next apps aren't React-normalized.
+        updated_files = normalize_files(parsed, detect_framework(req.files))
 
     project_id = _upsert_project(req.project_id, current_user.id, req.instruction, updated_files, source="enhance")
     return EnhanceResponse(project_id=project_id, files=updated_files, reply=reply)

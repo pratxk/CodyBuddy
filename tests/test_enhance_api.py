@@ -196,3 +196,37 @@ def test_enhance_non_premium_unaffected():
     assert r.status_code == 200, r.text
     out = r.json()["files"]
     assert "/ui/index.js" not in out  # no scaffold injected into a plain app
+
+
+def test_enhance_premium_partial_edit_merges_only_changed_files():
+    """A premium edit should apply the LLM's PARTIAL output (only the changed
+    file) over the current app — not require re-emitting all 22 files."""
+    from agent.premium_scaffold import PREMIUM_SCAFFOLD_FILES
+    premium_files = {
+        **PREMIUM_SCAFFOLD_FILES,
+        "/App.js": 'import { Sidebar } from "./ui"; export default function App(){return null;}',
+        "/data/mock.js": "export const rows = [];\n",
+        "/views/Pipeline.js": 'import { Card } from "../ui"; export const V = () => <Card>old</Card>;',
+        "/views/Other.js": 'export const O = () => null;',
+    }
+    # LLM returns ONLY the changed view (partial) — NOT the whole app.
+    llm_out = (
+        "=== REPLY ===\nAdded a create modal to the pipeline.\n"
+        "=== FILE: /views/Pipeline.js ===\n"
+        'import { Card, Modal, Button } from "../ui"; export const V = () => <Card>NEW MODAL</Card>;\n'
+    )
+    session = _mock_db_session()
+    with (
+        patch("api.enhance.chat", return_value=llm_out),
+        patch("api.enhance.SessionLocal", return_value=session),
+    ):
+        r = client.post("/api/enhance",
+                        json={"files": premium_files, "instruction": "add a create modal"})
+    assert r.status_code == 200, r.text
+    out = r.json()["files"]
+    # The changed view is updated…
+    assert "NEW MODAL" in out["/views/Pipeline.js"]
+    # …and everything the LLM DIDN'T emit is preserved (untouched view, mock, /ui kit).
+    assert out["/views/Other.js"] == premium_files["/views/Other.js"]
+    assert out["/data/mock.js"] == premium_files["/data/mock.js"]
+    assert out["/ui/index.js"] == PREMIUM_SCAFFOLD_FILES["/ui/index.js"]

@@ -568,6 +568,56 @@ Files to emit (all of them, in dependency order): {file_list}
 Use EXACTLY the delimiter format above (one REPLY block, then each file). No other text outside the delimiters."""
 
 
+def vibe_prompt_premium(editable_files: dict[str, str], instruction: str) -> str:
+    """SCOPED VibeEngineer prompt for a PREMIUM app.
+
+    The default vibe_prompt embeds EVERY file and demands the LLM re-emit ALL of
+    them — on a ~22-file premium app that means huge input + huge output → slow
+    and truncation-prone (why premium edits crawl and fail). Here we embed only
+    the EDITABLE surface (App.js, views, mock data, styles, package.json — NOT the
+    frozen /ui + /lib kit) plus the compact primitive cheatsheet, and ask for ONLY
+    the files that change. The caller merges the returned files over the current set.
+    """
+    current = "\n".join(
+        f"=== FILE: {path} ===\n{content}" for path, content in editable_files.items()
+    )
+    editable_list = ", ".join(editable_files.keys())
+    return f"""You are the VIBE ENGINEER refining a PREMIUM dark-theme React dashboard in a Sandpack sandbox.
+
+The app is built on a FROZEN pre-built primitive kit (imported from "../ui" / "./ui") — do NOT
+rewrite those primitives; compose them. Their API:
+
+{premium_primitives_cheatsheet()}
+
+User's instruction:
+{instruction}
+
+The EDITABLE app files (compose the kit above; the /ui + /lib kit is frozen and NOT shown here):
+{current}
+
+{PREMIUM_DASHBOARD_GUIDELINES}
+
+RULES:
+- Implement the instruction FULLY (a real, working feature — e.g. "add a modal to create a row" →
+  a proper <Modal> with labelled inputs, a <select> for enum/badge fields, basic validation, and it
+  actually appends to the relevant data/state on submit with a success useToast() toast).
+- Compose the frozen primitives (Modal, Button, Badge, DataTable, etc.) from "../ui"/"./ui"; NEVER
+  redefine them. Colors from CSS tokens var(--...), never raw hex.
+- Emit ONLY the files you CHANGE or CREATE. Do NOT re-emit unchanged files, and NEVER emit any /ui/*
+  or /lib/* file (frozen). Keep imports/refs coherent with the files you don't emit.
+- Every emitted file must be complete and valid.
+
+Output EXACTLY this format — one REPLY block, then ONLY the changed/new files. No prose, no fences:
+
+=== REPLY ===
+A SHORT (1-3 sentence) first-person message AS "the VibeEngineer": what you changed, like a teammate.
+=== FILE: /views/SomeView.js ===
+(full file body)
+
+(Editable files you may touch: {editable_list} — plus any NEW /views/* or /data/* file you add.
+Emit ONLY the ones that changed.)"""
+
+
 # ── Premium dashboard prompts (Phase 2) ───────────────────────────────────────
 # Specialized prompts that drive the multi-pass premium subgraph (Phase 3) to
 # compose the baked primitive kit (agent.premium_scaffold) into a real dark-theme
