@@ -93,5 +93,5 @@ def oncall(
 
     # ponytail: brief stored as the error string (truncated) so the project row is meaningful
     brief = f"OnCall fix: {req.error[:120]}"
-    project_id = _upsert_project(req.project_id, current_user.id, brief, fixed_files)
+    project_id = _upsert_project(req.project_id, current_user.id, brief, fixed_files, source="oncall")
     return OnCallResponse(project_id=project_id, files=fixed_files)

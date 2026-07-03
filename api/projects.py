@@ -11,6 +11,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import select
 
 from agent.scaffold import build_publish_repo, slugify
+from api.enhance import snapshot_version
 from auth.crypto import decrypt
 from auth.dependencies import get_current_user
 from db.database import SessionLocal
@@ -155,6 +156,65 @@ def update_history(
         row.oncall_log = body.oncall_log
         db.commit()
     return {"ok": True}
+
+
+class VersionSummary(BaseModel):
+    id: str
+    at: str
+    source: str
+    label: str
+
+
+@router.get("/{project_id}/versions", response_model=list[VersionSummary])
+def list_versions(project_id: str, current_user: User = Depends(get_current_user)) -> list[VersionSummary]:
+    """List a project's saved versions, newest first (metadata only — no files)."""
+    try:
+        pid = uuid.UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Project not found")
+    with SessionLocal() as db:
+        row = db.get(Project, pid)
+        if not row or row.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Project not found")
+        versions = list(row.versions or [])
+    return [
+        VersionSummary(
+            id=str(v.get("id", "")),
+            at=str(v.get("at", "")),
+            source=str(v.get("source", "edit")),
+            label=str(v.get("label", "")),
+        )
+        for v in reversed(versions)
+    ]
+
+
+class RevertBody(BaseModel):
+    version_id: str
+
+
+@router.post("/{project_id}/revert")
+def revert_project(project_id: str, body: RevertBody,
+                   current_user: User = Depends(get_current_user)) -> dict:
+    """Revert a project's files to a saved version. Snapshots the CURRENT files
+    first (as a "revert" version) so the revert is itself undoable. Returns the
+    reverted file set."""
+    try:
+        pid = uuid.UUID(project_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Project not found")
+    with SessionLocal() as db:
+        row = db.get(Project, pid)
+        if not row or row.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Project not found")
+        target = next((v for v in (row.versions or []) if v.get("id") == body.version_id), None)
+        if not target:
+            raise HTTPException(status_code=404, detail="Version not found")
+        # Snapshot current state so the revert can be undone, then restore.
+        snapshot_version(row, "revert", "before revert")
+        row.files = target["files"]
+        db.commit()
+        files = row.files
+    return {"project_id": project_id, "files": files}
 
 
 @router.delete("/{project_id}")

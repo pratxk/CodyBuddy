@@ -60,6 +60,11 @@ class Project(Base):
     # scripts/migrate_add_session_history.sql (create_all won't ALTER).
     chat: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     oncall_log: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    # ponytail: version history — a capped list of prior file snapshots so a user
+    # can revert when a change (OnCall/enhance/edit) messes the app up. Each entry:
+    # {id, at, source, label, files}. Existing Neon rows need
+    # scripts/migrate_add_versions.sql (create_all won't ALTER).
+    versions: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )

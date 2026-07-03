@@ -72,7 +72,7 @@ def uxmaster(
         updated_files = preserve_premium_scaffold(req.files, updated_files)
 
     label = instruction or "screenshot review"
-    project_id = _upsert_project(req.project_id, current_user.id, f"UX Master: {label}", updated_files)
+    project_id = _upsert_project(req.project_id, current_user.id, f"UX Master: {label}", updated_files, source="uxmaster")
     return UXMasterResponse(
         project_id=project_id,
         files=updated_files,

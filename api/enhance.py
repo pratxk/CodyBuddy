@@ -7,6 +7,7 @@ the coder node).
 """
 import logging
 import uuid
+from datetime import datetime as _dt, timezone as _tz
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -69,17 +70,43 @@ def enhance(
     if is_premium_shaped(req.files):
         updated_files = preserve_premium_scaffold(req.files, updated_files)
 
-    project_id = _upsert_project(req.project_id, current_user.id, req.instruction, updated_files)
+    project_id = _upsert_project(req.project_id, current_user.id, req.instruction, updated_files, source="enhance")
     return EnhanceResponse(project_id=project_id, files=updated_files, reply=reply)
 
 
-def _upsert_project(project_id: str | None, user_id: uuid.UUID, instruction: str, files: dict) -> str:
-    """Update existing project (owned by user) or create a new one; returns the project UUID string."""
+_MAX_VERSIONS = 15
+
+
+def snapshot_version(row: Project, source: str, label: str) -> None:
+    """Append the row's CURRENT files as a recoverable version BEFORE it's
+    overwritten, capped at the most recent _MAX_VERSIONS. So every agent change
+    (enhance/UX/OnCall) or revert preserves the prior state for one-click revert."""
+    if not getattr(row, "files", None):
+        return
+    entry = {
+        "id": str(uuid.uuid4()),
+        "at": _dt.now(_tz.utc).isoformat(),
+        "source": source,
+        "label": (label or "").strip()[:80],
+        "files": row.files,
+    }
+    prior = list(row.versions or [])
+    prior.append(entry)
+    row.versions = prior[-_MAX_VERSIONS:]
+
+
+def _upsert_project(project_id: str | None, user_id: uuid.UUID, instruction: str,
+                    files: dict, source: str = "edit") -> str:
+    """Update existing project (owned by user) or create a new one; returns the project UUID string.
+
+    Snapshots the PRIOR files as a version before overwriting an existing row, so
+    a bad change can be reverted."""
     try:
         with SessionLocal() as db:
             if project_id:
                 row = db.get(Project, uuid.UUID(project_id))
                 if row and row.user_id == user_id:
+                    snapshot_version(row, source, instruction)
                     row.files = files
                     db.commit()
                     db.refresh(row)

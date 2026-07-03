@@ -258,3 +258,59 @@ def test_put_history_non_list_oncall_log_returns_422(monkeypatch):
         json={"chat": [], "oncall_log": {"key": "not-a-list"}},
     )
     assert resp.status_code == 422
+
+
+# ── version history (snapshot on change + list + revert) ─────────────────────
+
+def test_snapshot_version_caps_and_records(monkeypatch):
+    from types import SimpleNamespace
+    from api.enhance import snapshot_version, _MAX_VERSIONS
+    row = SimpleNamespace(files={"/App.js": "v1"}, versions=[])
+    snapshot_version(row, "enhance", "made it blue")
+    assert len(row.versions) == 1
+    assert row.versions[0]["source"] == "enhance"
+    assert row.versions[0]["files"] == {"/App.js": "v1"}
+    # cap
+    row.versions = [{"id": str(i), "at": "x", "source": "e", "label": "", "files": {}} for i in range(_MAX_VERSIONS)]
+    row.files = {"/App.js": "newest"}
+    snapshot_version(row, "oncall", "fix")
+    assert len(row.versions) == _MAX_VERSIONS
+    assert row.versions[-1]["files"] == {"/App.js": "newest"}
+
+
+def test_list_versions_newest_first(monkeypatch):
+    import api.projects as proj_mod
+    row = _make_project_row()
+    row.versions = [
+        {"id": "a", "at": "2026-01-01T00:00:00Z", "source": "enhance", "label": "one", "files": {"/App.js": "1"}},
+        {"id": "b", "at": "2026-01-02T00:00:00Z", "source": "oncall", "label": "two", "files": {"/App.js": "2"}},
+    ]
+    monkeypatch.setattr(proj_mod, "SessionLocal", lambda: _FakeDB(row=row))
+    resp = client.get(f"/api/projects/{_PROJECT_ID_STR}/versions")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [v["id"] for v in body] == ["b", "a"]  # newest first
+    assert "files" not in body[0]  # metadata only
+
+
+def test_revert_restores_files_and_snapshots_current(monkeypatch):
+    import api.projects as proj_mod
+    row = _make_project_row()
+    row.files = {"/App.js": "CURRENT"}
+    row.versions = [{"id": "v1", "at": "x", "source": "enhance", "label": "old", "files": {"/App.js": "OLD"}}]
+    db = _FakeDB(row=row)
+    monkeypatch.setattr(proj_mod, "SessionLocal", lambda: db)
+    resp = client.post(f"/api/projects/{_PROJECT_ID_STR}/revert", json={"version_id": "v1"})
+    assert resp.status_code == 200
+    assert resp.json()["files"] == {"/App.js": "OLD"}      # reverted
+    assert row.files == {"/App.js": "OLD"}
+    # current was snapshotted first (so revert is undoable)
+    assert any(v["files"] == {"/App.js": "CURRENT"} for v in row.versions)
+
+
+def test_revert_unknown_version_404(monkeypatch):
+    import api.projects as proj_mod
+    row = _make_project_row(); row.versions = []
+    monkeypatch.setattr(proj_mod, "SessionLocal", lambda: _FakeDB(row=row))
+    resp = client.post(f"/api/projects/{_PROJECT_ID_STR}/revert", json={"version_id": "nope"})
+    assert resp.status_code == 404
