@@ -23,3 +23,6 @@ cryptography==48.0.0
 
 # Integrations (GitHub publish + PAT validation)
 httpx==0.28.1
+
+# Optional observability — LangSmith tracing (activates only if LANGSMITH_API_KEY is set)
+langsmith==0.4.14

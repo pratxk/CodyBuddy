@@ -124,10 +124,19 @@ def get_client(provider: str) -> OpenAI:
             raise RuntimeError(f"{cfg['api_key_env']} not set for provider {provider}")
         if provider == "cloudflare" and not _CF_ACCOUNT:
             raise RuntimeError("CLOUDFLARE_ACCOUNT_ID not set for provider cloudflare")
-        _clients[provider] = OpenAI(
+        client = OpenAI(
             base_url=cfg["base_url"], api_key=key,
             timeout=_PROVIDER_TIMEOUT.get(provider, 120.0),
         )
+        # Optional LangSmith tracing — only when a key is set (zero overhead otherwise).
+        # The in-app AI Logs work regardless; this adds LangSmith's richer trace UI.
+        if os.environ.get("LANGSMITH_API_KEY"):
+            try:
+                from langsmith.wrappers import wrap_openai
+                client = wrap_openai(client)
+            except Exception as exc:  # noqa: BLE001 — tracing must never break a build
+                logger.debug("LangSmith wrap skipped: %s", exc)
+        _clients[provider] = client
     return _clients[provider]
 
 
