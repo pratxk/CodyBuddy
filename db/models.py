@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -72,3 +72,22 @@ class Project(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
     # ponytail: index=True on the column handles ix_projects_session_id; no __table_args__ needed
+
+
+class AiCallLog(Base):
+    """Observability — one row per LLM call across all agents. Best-effort
+    (writes never break a build). SUPER_ADMIN-only viewer reads recent rows."""
+
+    __tablename__ = "ai_call_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    agent: Mapped[str] = mapped_column(String, nullable=False, default="")
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="chat")
+    provider: Mapped[str] = mapped_column(String, nullable=False, default="")
+    model: Mapped[str] = mapped_column(String, nullable=False, default="")
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    response: Mapped[str] = mapped_column(Text, nullable=False, default="")

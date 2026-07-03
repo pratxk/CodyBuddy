@@ -28,7 +28,7 @@ def _planner_node(emitter, premium=False, framework="react"):
         # ponytail: generous budget — reasoning-model fallbacks (Cerebras gpt-oss, GLM)
         # spend tokens thinking, so a tight cap truncates the JSON ("Unterminated string").
         plan = chat_structured(planner_prompt(state["user_prompt"], premium=premium, framework=framework),
-                               Plan, chain=PLANNER_CHAIN, max_tokens=6000 if premium else 4000)
+                               Plan, chain=PLANNER_CHAIN, max_tokens=6000 if premium else 4000, agent="planner")
         if emitter:
             emitter.end_current(ok=True); emitter.start_next()
         return {"plan": plan}
@@ -42,7 +42,7 @@ def _architect_node(emitter, premium=False, framework="react"):
         # are bigger (8-14 files), so give them 16000.
         task_plan = chat_structured(
             architect_prompt(plan.model_dump_json(indent=2), premium=premium, framework=framework),
-            TaskPlan, chain=PLANNER_CHAIN, max_tokens=16000 if premium else 10000)
+            TaskPlan, chain=PLANNER_CHAIN, max_tokens=16000 if premium else 10000, agent="architect")
         if emitter:
             emitter.end_current(ok=True); emitter.start_next()
         return {"plan": plan, "task_plan": task_plan, "plan_json": plan.model_dump_json()}
@@ -68,7 +68,7 @@ def _coder_node(emitter, premium=False, framework="react"):
         on_delta = emitter.chunk if emitter else None
         raw = chat_stream(coder_prompt(task_dicts, plan_json, premium=premium, framework=framework),
                           chain=chain, system=coder_system_prompt(framework),
-                          max_tokens=max_tokens, on_delta=on_delta)
+                          max_tokens=max_tokens, on_delta=on_delta, agent="coder")
         files = parse_multi_file_response(raw, strip_code_fences)
         for path in files:
             logger.info("Coder: wrote %s (%d chars)", path, len(files[path]))
@@ -146,7 +146,7 @@ def _premium_planner_node(emitter):
         # sizeable; a tight cap truncates the JSON. Cap views AFTER validation (immutable copy).
         plan: PremiumPlan = chat_structured(
             premium_planner_prompt(state["user_prompt"]), PremiumPlan,
-            chain=PLANNER_CHAIN, max_tokens=6000)
+            chain=PLANNER_CHAIN, max_tokens=6000, agent="planner")
         if len(plan.views) > MAX_PREMIUM_VIEWS:
             plan = plan.model_copy(update={"views": plan.views[:MAX_PREMIUM_VIEWS]})
         if emitter:
@@ -166,7 +166,7 @@ def _premium_architect_node(emitter):
         plan: PremiumPlan = state["plan"]
         arch: PremiumArchitecture = chat_structured(
             premium_architect_prompt(plan.model_dump_json()), PremiumArchitecture,
-            chain=PLANNER_CHAIN, max_tokens=16000)
+            chain=PLANNER_CHAIN, max_tokens=16000, agent="architect")
         # ponytail: never emit more views than the plan has steps (bound to the cap).
         if len(arch.view_specs) > len(plan.views):
             arch = arch.model_copy(update={"view_specs": arch.view_specs[:len(plan.views)]})
@@ -183,7 +183,7 @@ def _coder_shell_node(emitter):
         on_delta = emitter.chunk if emitter else None
         raw = chat_stream(coder_shell_prompt(state["plan_json"], arch.mock_schema),
                           chain=CODER_CHAIN_PREMIUM, system=premium_coder_system_prompt(),
-                          max_tokens=12000, on_delta=on_delta)
+                          max_tokens=12000, on_delta=on_delta, agent="shell")
         shell_files = parse_multi_file_response(raw, strip_code_fences)
         for path in shell_files:
             logger.info("Shell coder: wrote %s (%d chars)", path, len(shell_files[path]))
@@ -203,7 +203,7 @@ def _coder_view_node(spec, palette: dict, on_delta):
     try:
         raw = chat_stream(coder_view_prompt(spec.model_dump_json(), spec.data_keys, palette),
                           chain=CODER_CHAIN_PREMIUM, system=premium_coder_system_prompt(),
-                          max_tokens=8000, on_delta=on_delta)
+                          max_tokens=8000, on_delta=on_delta, agent=f"view:{spec.view_id}")
         return parse_multi_file_response(raw, strip_code_fences)
     except Exception as exc:  # noqa: BLE001  ponytail: one view failing must not sink the build
         logger.warning("View coder failed for %s: %s", getattr(spec, "filepath", "?"), exc)
@@ -277,7 +277,7 @@ def _repair_view(path: str, content: str, error: str) -> str | None:
     premium coder chain). Returns the repaired body, or None if it couldn't be parsed."""
     try:
         raw = chat(oncall_prompt({path: content}, error), chain=CODER_CHAIN_PREMIUM,
-                   system=premium_coder_system_prompt(), max_tokens=8000)
+                   system=premium_coder_system_prompt(), max_tokens=8000, agent="repair")
         repaired = parse_multi_file_response(raw, strip_code_fences)
         return repaired.get(path) or repaired.get(_norm_path(path))
     except Exception as exc:  # noqa: BLE001  ponytail: a failed repair must not crash the build

@@ -26,6 +26,19 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+
+def _log(agent, kind, provider, model, t0, ok, error, prompt, response) -> None:
+    """Best-effort observability record for one LLM call (never raises)."""
+    try:
+        from db.ai_logs import log_ai_call
+        log_ai_call(
+            agent=agent, kind=kind, provider=provider, model=model,
+            latency_ms=int((time.monotonic() - t0) * 1000),
+            ok=ok, error=error, prompt=prompt, response=response,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
 # ── Provider configuration ──────────────────────────────────────────────────────
 # Cloudflare Workers AI uses an OpenAI-compatible endpoint whose URL embeds the account id.
 _CF_ACCOUNT = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
@@ -138,6 +151,7 @@ def chat(
     system: str | None = None,
     max_tokens: int = 2048,
     temperature: float = 0.2,
+    agent: str = "",
 ) -> str:
     chain = usable_chain(chain or PLANNER_CHAIN)
     if not chain:
@@ -150,14 +164,18 @@ def chat(
 
     last_err: Exception | None = None
     for provider, model in chain:
+        t0 = time.monotonic()
         try:
             resp = get_client(provider).chat.completions.create(
                 model=model, messages=messages,  # type: ignore[arg-type]
                 max_tokens=max_tokens, temperature=temperature,
             )
-            return (resp.choices[0].message.content or "").strip()
+            out = (resp.choices[0].message.content or "").strip()
+            _log(agent, "chat", provider, model, t0, True, "", prompt, out)
+            return out
         except _RETRYABLE as exc:
             last_err = exc
+            _log(agent, "chat", provider, model, t0, False, str(exc), prompt, "")
             logger.warning("Provider %s/%s failed: %s — falling back", provider, model, exc)
             continue
     raise AllProvidersFailed(f"All providers failed: {last_err}")
@@ -171,6 +189,7 @@ def chat_vision(
     system: str | None = None,
     max_tokens: int = 4096,
     temperature: float = 0.2,
+    agent: str = "",
 ) -> str:
     """Multimodal chat — sends a text prompt + an image (base64 data URL) to a vision model.
 
@@ -195,14 +214,18 @@ def chat_vision(
 
     last_err: Exception | None = None
     for provider, model in chain:
+        t0 = time.monotonic()
         try:
             resp = get_client(provider).chat.completions.create(
                 model=model, messages=messages,  # type: ignore[arg-type]
                 max_tokens=max_tokens, temperature=temperature,
             )
-            return (resp.choices[0].message.content or "").strip()
+            out = (resp.choices[0].message.content or "").strip()
+            _log(agent, "vision", provider, model, t0, True, "", prompt, out)
+            return out
         except _RETRYABLE as exc:
             last_err = exc
+            _log(agent, "vision", provider, model, t0, False, str(exc), prompt, "")
             logger.warning("Vision provider %s/%s failed: %s — falling back", provider, model, exc)
             continue
     raise AllProvidersFailed(f"All vision providers failed: {last_err}")
@@ -216,6 +239,7 @@ def chat_stream(
     max_tokens: int = 2048,
     temperature: float = 0.2,
     on_delta: Callable[[str], None] | None = None,
+    agent: str = "",
 ) -> str:
     """Stream the FIRST usable provider, invoking on_delta per text chunk, and return the
     full accumulated text.
@@ -236,6 +260,7 @@ def chat_stream(
     first_provider, first_model = chain[0]
     fallback_chain = chain
     if first_provider in _STREAM_TRUSTED:
+        t0 = time.monotonic()
         try:
             stream = get_client(first_provider).chat.completions.create(
                 model=first_model, messages=messages,  # type: ignore[arg-type]
@@ -251,16 +276,18 @@ def chat_stream(
                         on_delta(delta)
             full = "".join(parts).strip()
             if full:
+                _log(agent, "stream", first_provider, first_model, t0, True, "", prompt, full)
                 return full
             logger.warning("Streaming %s/%s yielded empty output — falling back", first_provider, first_model)
         except Exception as exc:  # noqa: BLE001  ponytail: any SDK/stream hiccup → non-stream fallback
+            _log(agent, "stream", first_provider, first_model, t0, False, str(exc), prompt, "")
             logger.warning("Streaming %s/%s failed: %s — falling back to non-streaming", first_provider, first_model, exc)
         fallback_chain = chain[1:]  # first provider already attempted (and failed)
 
     if not fallback_chain:
         raise AllProvidersFailed("Streaming provider failed and no fallback provider available")
     return chat(prompt, chain=fallback_chain, system=system,
-                max_tokens=max_tokens, temperature=temperature)
+                max_tokens=max_tokens, temperature=temperature, agent=agent)
 
 
 _FENCE_OPEN_RE = re.compile(r"^```[a-zA-Z0-9_+-]*\s*\n?")
@@ -294,13 +321,14 @@ def chat_structured(
     system: str | None = None,
     max_tokens: int = 2048,
     retries: int = 3,
+    agent: str = "",
 ) -> T:
     last_err: Exception | None = None
     current = prompt
     for attempt in range(1, retries + 1):
         try:
             raw = chat(current, chain=chain, system=system,
-                       max_tokens=max_tokens, temperature=0.1)
+                       max_tokens=max_tokens, temperature=0.1, agent=agent)
             return schema.model_validate(parse_json(raw))
         except (ValueError, ValidationError, json.JSONDecodeError) as exc:
             last_err = exc

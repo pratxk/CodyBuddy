@@ -13,6 +13,7 @@ from api.integrations import router as integrations_router
 from api.intake import router as intake_router
 from api.oncall import router as oncall_router
 from api.projects import router as projects_router
+from api.admin import router as admin_router
 from api.uxmaster import router as uxmaster_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -50,6 +51,7 @@ app.include_router(uxmaster_router, prefix="/api")
 app.include_router(oncall_router, prefix="/api")
 app.include_router(intake_router, prefix="/api")
 app.include_router(projects_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
 app.include_router(integrations_router, prefix="/api")
 
 

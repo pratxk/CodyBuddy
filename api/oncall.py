@@ -80,7 +80,7 @@ def oncall(
         oncall_prompt(req.files, req.error),
         chain=CODER_CHAIN,
         system=CODER_SYSTEM_PROMPT,
-        max_tokens=8192,
+        max_tokens=8192, agent="oncall",
     )
     parsed = parse_multi_file_response(raw, strip_code_fences)
     fixed_files = normalize_files(parsed, detect_framework(req.files))

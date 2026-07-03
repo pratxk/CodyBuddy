@@ -61,7 +61,7 @@ def uxmaster(
         req.image,
         chain=VISION_CHAIN,  # gemini-only — the multimodal model in the pool
         system=CODER_SYSTEM_PROMPT,
-        max_tokens=20000 if premium else 8192,
+        max_tokens=20000 if premium else 8192, agent="uxmaster",
     )
     # ponytail: ONE call emits the conversational reply, the verify boolean, and the files.
     reply, needs_verification, parsed = parse_uxmaster_response(raw, strip_code_fences)

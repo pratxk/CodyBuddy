@@ -62,7 +62,7 @@ def enhance(
                     if not p.startswith(("/ui/", "/lib/"))}
         raw = chat(
             vibe_prompt_premium(editable, req.instruction),
-            chain=chain, system=CODER_SYSTEM_PROMPT, max_tokens=16000,
+            chain=chain, system=CODER_SYSTEM_PROMPT, max_tokens=16000, agent="enhance",
         )
         reply, changed = parse_reply_and_files(raw, strip_code_fences)
         reply = reply or "Applied your changes."
@@ -72,7 +72,7 @@ def enhance(
     else:
         raw = chat(
             vibe_prompt(req.files, req.instruction, premium=premium),
-            chain=chain, system=CODER_SYSTEM_PROMPT, max_tokens=20000 if premium else 8192,
+            chain=chain, system=CODER_SYSTEM_PROMPT, max_tokens=20000 if premium else 8192, agent="enhance",
         )
         reply, parsed = parse_reply_and_files(raw, strip_code_fences)
         reply = reply or "Applied your changes."
