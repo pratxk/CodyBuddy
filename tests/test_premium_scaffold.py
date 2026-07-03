@@ -150,3 +150,42 @@ def test_cheatsheet_mentions_appshell_chartcard_and_icon_string():
     assert "ChartCard" in sheet
     # icon may be a lucide NAME STRING (documented for the coder)
     assert "NAME STRING" in sheet or "name string" in sheet.lower()
+
+
+def test_premium_package_json_declares_kit_deps():
+    """The baked manifest must declare lucide-react + recharts (the /ui kit needs
+    them) so they're never missing → no DependencyNotFoundError."""
+    import json
+    from agent.premium_scaffold import PREMIUM_SCAFFOLD_FILES
+    pkg = json.loads(PREMIUM_SCAFFOLD_FILES["/package.json"])
+    deps = pkg["dependencies"]
+    for name in ("react", "react-dom", "lucide-react", "recharts"):
+        assert name in deps, f"baked package.json missing {name}"
+
+
+def test_ensure_premium_deps_restores_dropped_kit_deps():
+    """A refine/repair that returns a slim manifest must get the kit deps back."""
+    from agent.premium_scaffold import ensure_premium_deps
+    files = {"/package.json": '{"name":"x","dependencies":{"react":"^18.2.0","react-dom":"^18.2.0"}}'}
+    out = ensure_premium_deps(files)
+    import json
+    deps = json.loads(out["/package.json"])["dependencies"]
+    assert "lucide-react" in deps and "recharts" in deps
+    # existing/extra deps preserved
+    assert deps["react"] == "^18.2.0"
+
+
+def test_preserve_premium_scaffold_guarantees_kit_deps():
+    """preserve_premium_scaffold (used by enhance/uxmaster/oncall) must guarantee
+    the kit deps even when the LLM re-emitted a manifest without them."""
+    import json
+    from agent.premium_scaffold import preserve_premium_scaffold, PREMIUM_SCAFFOLD_FILES
+    original = {**PREMIUM_SCAFFOLD_FILES, "/App.js": "export default () => null;"}
+    # LLM re-emits App.js + a stripped package.json (react only).
+    updated = {
+        "/App.js": "export default () => null;",
+        "/package.json": '{"name":"x","dependencies":{"react":"^18.2.0"}}',
+    }
+    out = preserve_premium_scaffold(original, updated)
+    deps = json.loads(out["/package.json"])["dependencies"]
+    assert "lucide-react" in deps and "recharts" in deps and "react-dom" in deps

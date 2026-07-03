@@ -1299,8 +1299,9 @@ export { resolveIcon } from "./icon";
 """
 
 # ── /package.json ───────────────────────────────────────────────────────────
-# react/react-dom base; lucide-react + recharts are backfilled from imports by
-# scaffold.ensure_dependencies (which only augments an EXISTING manifest).
+# The baked kit ALWAYS imports lucide-react + recharts, so declare them up front
+# (never rely on backfill — a refine/repair that re-emits a slim manifest would
+# otherwise drop them → DependencyNotFoundError even though the /ui files need them).
 _PACKAGE_JSON = """\
 {
   "name": "premium-dashboard",
@@ -1308,10 +1309,21 @@ _PACKAGE_JSON = """\
   "main": "/index.js",
   "dependencies": {
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "lucide-react": "^0.460.0",
+    "recharts": "^2.15.0"
   }
 }
 """
+
+# The premium kit cannot render without these — guaranteed on every premium
+# generate / refine / repair so the deps can never be silently dropped.
+PREMIUM_REQUIRED_DEPS: dict[str, str] = {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "lucide-react": "^0.460.0",
+    "recharts": "^2.15.0",
+}
 
 PREMIUM_SCAFFOLD_FILES: dict[str, str] = {
     "/styles.css": _STYLES_CSS,
@@ -1429,17 +1441,50 @@ def is_premium_shaped(files: dict) -> bool:
     return "/ui/index.js" in (files or {})
 
 
+def ensure_premium_deps(files: dict) -> dict:
+    """Guarantee the premium kit's required npm deps are in /package.json.
+
+    The frozen /ui kit ALWAYS imports lucide-react + recharts, so if a refine/
+    repair LLM re-emitted a slim manifest (or ensure_dependencies ran before the
+    /ui files were re-overlaid), those deps go missing → DependencyNotFoundError.
+    Merge the required deps in without touching any extra deps the app added.
+    """
+    import json as _json
+
+    key = "/package.json" if "/package.json" in files else "package.json"
+    raw = files.get(key)
+    try:
+        pkg = _json.loads(raw) if isinstance(raw, str) and raw.strip() else {}
+    except (ValueError, TypeError):
+        pkg = {}
+    if not isinstance(pkg, dict):
+        pkg = {}
+    deps = pkg.get("dependencies")
+    if not isinstance(deps, dict):
+        deps = {}
+    for name, version in PREMIUM_REQUIRED_DEPS.items():
+        deps.setdefault(name, version)
+    pkg.setdefault("name", "premium-dashboard")
+    pkg.setdefault("version", "1.0.0")
+    pkg.setdefault("main", "/index.js")
+    pkg["dependencies"] = deps
+    out = dict(files)
+    out[key] = _json.dumps(pkg, indent=2) + "\n"
+    return out
+
+
 def preserve_premium_scaffold(original: dict, updated: dict) -> dict:
     """Make an LLM refine/repair safe for a premium app.
 
     Layer the LLM's changes over the ORIGINAL files (so nothing the LLM silently
     dropped is lost), then re-overlay the FROZEN import-critical kit (/ui/*,
     /lib/*) from the baked scaffold LAST so the barrel + primitives can never be
-    clobbered. The refinable surface (styles, App, views, mock data, package.json)
-    stays whatever the LLM produced, so refines still take effect.
+    clobbered, and guarantee the required deps so the kit always resolves. The
+    refinable surface (styles, App, views, mock data) stays whatever the LLM
+    produced, so refines still take effect.
     """
     merged = {**original, **updated}
     for path, code in PREMIUM_SCAFFOLD_FILES.items():
         if path.startswith(_FROZEN_PREFIXES):
             merged[path] = code
-    return merged
+    return ensure_premium_deps(merged)
