@@ -52,6 +52,8 @@ PROVIDERS: dict[str, dict] = {
                    "api_key_env": "CLOUDFLARE_API_TOKEN"},
     "openrouter": {"base_url": "https://openrouter.ai/api/v1",      "api_key_env": "OPENROUTER_API_KEY"},
     "nvidia":     {"base_url": "https://integrate.api.nvidia.com/v1","api_key_env": "NVIDIA_API_KEY"},
+    "tokenrouter": {"base_url": "https://api.tokenrouter.com/v1",      "api_key_env": "TOKENROUTER_API_KEY"},
+    "opencode":   {"base_url": "https://opencode.ai/zen/v1",          "api_key_env": "OPENCODE_API_KEY"},
 }
 
 # Cloudflare GLM is a large reasoning model with slow (60s+) cold starts; give it headroom.
@@ -67,14 +69,22 @@ _PROVIDER_TIMEOUT: dict[str, float] = {"cloudflare": 180.0}
 # RPD + 1M ctx, SambaNova fast/low-RPM) so a single provider's cap never drops us to the
 # slow tier — only then Cloudflare GLM (quality, 10k neurons/day) → NVIDIA (reliable) →
 # OpenRouter (free, flaky). All seven verified live to produce valid Sandpack apps.
+# 2026-11-25 cleanup (each replacement verified live against that provider's model list):
+# removed dead ids — OpenRouter llama-3.3-70b-instruct:free + qwen3-coder:free, SambaNova
+# Meta-Llama-3.3-70B-Instruct, NVIDIA meta/llama-3.3-70b-instruct (all delisted).
+# Added TokenRouter + OpenCode (OpenAI-compatible, free DeepSeek V4.1 Flash; the TokenRouter
+# key was tested live 2026-11-25). Free legs sit after the trusted streamers in CODER_CHAIN
+# so live streaming still leads with a trusted provider.
 PLANNER_CHAIN: list[tuple[str, str]] = [
     ("groq", "llama-3.3-70b-versatile"),
     ("cerebras", "gpt-oss-120b"),
     ("gemini", "gemini-2.5-flash"),
-    ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
+    ("tokenrouter", "deepseek/deepseek-v4.1-flash-1017-free"),
+    ("sambanova", "gpt-oss-120b"),
     ("cloudflare", "@cf/zai-org/glm-5.2"),
-    ("nvidia", "meta/llama-3.3-70b-instruct"),
-    ("openrouter", "meta-llama/llama-3.3-70b-instruct:free"),
+    ("nvidia", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"),
+    ("opencode", "deepseek-v4.1-flash-free"),
+    ("openrouter", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"),
 ]
 # ponytail: coder requests are large (max_tokens=14000 for rich apps) → Groq's 12k TPM 413s,
 # so lead with high-capacity providers (Cerebras 1M/day+fast, Gemini 1M-ctx, NVIDIA, GLM).
@@ -82,11 +92,13 @@ PLANNER_CHAIN: list[tuple[str, str]] = [
 CODER_CHAIN: list[tuple[str, str]] = [
     ("cerebras", "gpt-oss-120b"),
     ("gemini", "gemini-2.5-flash"),
-    ("nvidia", "meta/llama-3.3-70b-instruct"),
+    ("nvidia", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"),
     ("cloudflare", "@cf/zai-org/glm-5.2"),
-    ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
+    ("sambanova", "gpt-oss-120b"),
     ("groq", "llama-3.3-70b-versatile"),
-    ("openrouter", "qwen/qwen3-coder:free"),
+    ("tokenrouter", "deepseek/deepseek-v4.1-flash-1017-free"),
+    ("opencode", "deepseek-v4.1-flash-free"),
+    ("openrouter", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"),
 ]
 # ponytail: PREMIUM coder builds run at max_tokens=20000 — drop Groq (12k TPM → 413) and
 # OpenRouter free (429s under load). Lead with the highest-capacity providers that can serve
@@ -94,10 +106,10 @@ CODER_CHAIN: list[tuple[str, str]] = [
 # (1M ctx) → SambaNova. All can return a 20k-token response without truncating the file set.
 CODER_CHAIN_PREMIUM: list[tuple[str, str]] = [
     ("cerebras", "gpt-oss-120b"),
-    ("nvidia", "meta/llama-3.3-70b-instruct"),
+    ("nvidia", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning"),
     ("cloudflare", "@cf/zai-org/glm-5.2"),
     ("gemini", "gemini-2.5-flash"),
-    ("sambanova", "Meta-Llama-3.3-70B-Instruct"),
+    ("sambanova", "gpt-oss-120b"),
 ]
 # ponytail: Gemini 2.5 Flash is free + MULTIMODAL — the only vision-capable model in the pool,
 # so the vision chain is gemini-only (no second fallback that's verified to accept image_url).

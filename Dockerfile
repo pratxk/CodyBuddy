@@ -13,4 +13,5 @@ COPY integrations/ integrations/
 RUN useradd --no-create-home --shell /bin/false appuser
 USER appuser
 EXPOSE 7860
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "7860"]
+# Cloud Run sets $PORT (default 8080); listen on it when present, else 7860 (HF/local).
+CMD ["sh", "-c", "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-7860}"]
